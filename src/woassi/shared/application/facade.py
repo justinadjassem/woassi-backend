@@ -1,3 +1,5 @@
+"""Use cases the shared api needs, provided by the composition root (`Container`)."""
+
 from typing import Protocol
 
 from woassi.shared.application.audit import ListAuditEntries

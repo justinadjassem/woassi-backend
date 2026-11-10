@@ -1,3 +1,5 @@
+"""SQLAlchemy models of the shops module. The aggregate's parts load with the shop."""
+
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -10,6 +12,8 @@ from woassi.shared.infrastructure.db.base import Base
 
 
 class ShopSettingsModel(Base):
+    """Row of `shop_settings`, one per shop."""
+
     __tablename__ = "shop_settings"
 
     shop_id: Mapped[UUID] = mapped_column(
@@ -29,6 +33,8 @@ class ShopSettingsModel(Base):
 
 
 class WhatsAppAccountModel(Base):
+    """Row of `whatsapp_accounts`, at most one per shop. The token is encrypted."""
+
     __tablename__ = "whatsapp_accounts"
     __table_args__ = (
         CheckConstraint(
@@ -52,6 +58,8 @@ class WhatsAppAccountModel(Base):
 
 
 class ReceivingAccountModel(Base):
+    """Row of `receiving_accounts`, at most one per shop."""
+
     __tablename__ = "receiving_accounts"
     __table_args__ = (CheckConstraint("operator IN ('MIXX', 'MOOV')", name="operator_valid"),)
 
@@ -66,6 +74,8 @@ class ReceivingAccountModel(Base):
 
 
 class ShopModel(Base):
+    """Row of `shops`. An archived shop has `archived_at` set and is never deleted."""
+
     __tablename__ = "shops"
     __table_args__ = (
         CheckConstraint("status IN ('DRAFT', 'ACTIVE', 'SUSPENDED')", name="status_valid"),

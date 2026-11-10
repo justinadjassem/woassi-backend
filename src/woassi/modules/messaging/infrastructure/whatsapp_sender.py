@@ -30,6 +30,7 @@ RETRY_DELAYS_S = (2.0, 6.0)
 
 def _recipient(recipient: Recipient) -> dict[str, str]:
     # `to` takes precedence when both are sent.
+    """Recipient fields of the request body: `to` (phone) or `recipient` (BSUID)."""
     if recipient.phone is not None:
         return {"to": recipient.phone.value}
     assert recipient.user_id is not None
@@ -37,6 +38,7 @@ def _recipient(recipient: Recipient) -> dict[str, str]:
 
 
 def _content(content: MessageContent) -> dict[str, Any]:
+    """Type-specific fields of the request body."""
     match content:
         case TextMessage():
             return {"type": "text", "text": {"preview_url": False, "body": content.body}}
@@ -82,6 +84,7 @@ def _content(content: MessageContent) -> dict[str, Any]:
 
 
 def _failure(status: int, code: int | None) -> SendFailure:
+    """Classifies a refusal by Meta's error code, then by HTTP status."""
     if code == OUTSIDE_WINDOW:
         return SendFailure.OUTSIDE_WINDOW
     if code in RATE_LIMITED:
@@ -96,6 +99,8 @@ def _failure(status: int, code: int | None) -> SendFailure:
 
 
 class HttpxWhatsAppSender:
+    """`WhatsAppSender` on the Graph API, with a short retry on rate limits."""
+
     def __init__(
         self,
         graph: GraphClient,
@@ -110,6 +115,12 @@ class HttpxWhatsAppSender:
     async def send(
         self, connection: ShopConnection, recipient: Recipient, content: MessageContent
     ) -> str:
+        """Sends `content` and returns Meta's message id (wamid).
+
+        Retries only when Meta certainly sent nothing: connection failure or rate limit.
+        Raises
+        SendError otherwise.
+        """
         body = {
             "messaging_product": "whatsapp",
             "recipient_type": "individual",
@@ -142,6 +153,7 @@ class HttpxWhatsAppSender:
 
 
 def _message_id(data: dict[str, Any]) -> str:
+    """Message id from Meta's answer; raises SendError if missing."""
     messages = data.get("messages")
     if isinstance(messages, list) and messages and isinstance(messages[0], dict):
         message_id = messages[0].get("id")

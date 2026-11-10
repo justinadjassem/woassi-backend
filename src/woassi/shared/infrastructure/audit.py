@@ -1,3 +1,5 @@
+"""SQLAlchemy implementation of the audit log."""
+
 from collections.abc import Mapping, Sequence
 from datetime import datetime
 from typing import Any
@@ -14,6 +16,8 @@ from woassi.shared.infrastructure.db.base import Base
 
 
 class AuditEntryModel(Base):
+    """Row of the append-only `audit_log` table."""
+
     __tablename__ = "audit_log"
     __table_args__ = (Index("ix_audit_log_shop_id_created_at", "shop_id", "created_at"),)
 
@@ -30,6 +34,7 @@ class AuditEntryModel(Base):
 
 
 def _to_domain(model: AuditEntryModel) -> AuditEntry:
+    """Converts a row to a domain `AuditEntry`."""
     return AuditEntry(
         id=model.id,
         account_id=model.account_id,
@@ -61,6 +66,7 @@ class SqlAlchemyAuditLog:
         details: Mapping[str, Any] | None = None,
         ip: str | None = None,
     ) -> None:
+        """Adds the entry to the session and flushes, so a database error shows here."""
         self._session.add(
             AuditEntryModel(
                 id=uuid4(),
@@ -77,6 +83,7 @@ class SqlAlchemyAuditLog:
         await self._session.flush()
 
     async def list(self, shop_id: UUID, offset: int, limit: int) -> Sequence[AuditEntry]:
+        """Entries of `shop_id`, newest first; the id breaks ties for a stable order."""
         models = await self._session.scalars(
             select(AuditEntryModel)
             .where(AuditEntryModel.shop_id == shop_id)

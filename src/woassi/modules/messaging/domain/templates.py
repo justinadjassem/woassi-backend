@@ -45,6 +45,8 @@ class TemplateDefinition:
 
 
 class TemplateStatus(StrEnum):
+    """Review status of a template. Only APPROVED can be sent."""
+
     PENDING = "PENDING"
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
@@ -80,6 +82,8 @@ def same_language(meta_language: str, language: str) -> bool:
 
 @dataclass(slots=True)
 class MessageTemplate:
+    """A template submitted to a shop's account, in one language, and its review status."""
+
     shop_id: UUID
     waba_id: str
     name: str
@@ -90,4 +94,5 @@ class MessageTemplate:
 
     @property
     def sendable(self) -> bool:
+        """True if Meta approved the template."""
         return self.status is TemplateStatus.APPROVED

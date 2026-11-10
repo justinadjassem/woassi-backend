@@ -1,3 +1,5 @@
+"""Account registration and phone number verification."""
+
 from woassi.modules.accounts.application.dto import AccountView, account_view
 from woassi.modules.accounts.application.limits import CODE_LIMIT, CODE_WINDOW_S, code_key, enforce
 from woassi.modules.accounts.application.ports import (
@@ -17,6 +19,8 @@ from woassi.shared.application.ports import Clock, PhoneNormalizer, RateLimiter
 
 
 class Register:
+    """Creates an account and sends a code to verify its phone number."""
+
     def __init__(
         self,
         uow: AccountsUnitOfWork,
@@ -36,6 +40,14 @@ class Register:
     async def execute(
         self, *, full_name: str, phone: str, password: str, email: str | None = None
     ) -> AccountView:
+        """Creates the account, unverified, and sends the verification code once committed.
+
+        Raises:
+            InvalidData: the phone number is not valid.
+            WeakPassword: the password breaks the length rules.
+            RateLimited: too many codes sent to this phone number.
+            PhoneAlreadyUsed: an account already uses this phone number.
+        """
         normalized = self._phones.normalize(phone)
         validate_password(password)
         await enforce(self._limiter, code_key(normalized.value), CODE_LIMIT, CODE_WINDOW_S)
@@ -62,6 +74,8 @@ class Register:
 
 
 class VerifyPhone:
+    """Marks an account's phone number as verified, with the code sent to it."""
+
     def __init__(
         self,
         uow: AccountsUnitOfWork,
@@ -75,6 +89,10 @@ class VerifyPhone:
         self._clock = clock
 
     async def execute(self, *, phone: str, code: str) -> None:
+        """Raises InvalidCode for an unknown phone or a wrong, expired or exhausted code.
+
+        Every case takes the same time, so the error does not reveal whether the phone exists.
+        """
         normalized = parse_phone(self._phones, phone)
         async with self._uow as uow:
             account = await uow.accounts.get_by_phone(normalized) if normalized else None

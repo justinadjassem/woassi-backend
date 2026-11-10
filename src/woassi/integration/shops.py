@@ -1,3 +1,5 @@
+"""Shops module seen from `shared`, `messaging` and `orders`."""
+
 from uuid import UUID
 
 from woassi.modules.messaging.application.ports import ShopConnection
@@ -20,10 +22,12 @@ class ShopsOwnership:
         self._use_case = use_case
 
     async def owns(self, account_id: UUID, shop_id: UUID) -> bool:
+        """True if the account owns this shop and it is not archived."""
         return await self._use_case.execute(account_id=account_id, shop_id=shop_id)
 
 
 def _connection(routing: ShopRouting | None) -> ShopConnection | None:
+    """Converts the shops module's routing data into a messaging `ShopConnection`."""
     if routing is None:
         return None
     return ShopConnection(
@@ -44,9 +48,11 @@ class ShopsConnections:
         self._by_shop = by_shop
 
     async def by_phone_number_id(self, phone_number_id: str) -> ShopConnection | None:
+        """The connected shop behind a WhatsApp number, to route a webhook."""
         return _connection(await self._by_phone_number.execute(phone_number_id))
 
     async def by_shop_id(self, shop_id: UUID) -> ShopConnection | None:
+        """The WhatsApp connection of a shop, to send from its number."""
         return _connection(await self._by_shop.execute(shop_id))
 
 
@@ -57,6 +63,7 @@ class ShopsWhatsAppAccounts:
         self._use_case = use_case
 
     async def account_removed(self, waba_id: str) -> int:
+        """Disconnects every shop of a WhatsApp Business Account; returns how many."""
         return await self._use_case.execute(waba_id)
 
 
@@ -67,6 +74,7 @@ class ShopsOrderProfiles:
         self._use_case = use_case
 
     async def profile(self, shop_id: UUID) -> ShopProfile | None:
+        """What the order flow needs to know about a shop; None if it does not exist."""
         profile = await self._use_case.execute(shop_id)
         if profile is None:
             return None

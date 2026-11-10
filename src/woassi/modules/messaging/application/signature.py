@@ -1,3 +1,5 @@
+"""Webhook signature: an HMAC-SHA256 of the raw body, keyed with the Meta app secret."""
+
 import hashlib
 import hmac
 

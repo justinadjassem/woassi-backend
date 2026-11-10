@@ -1,3 +1,5 @@
+"""Reading the audit log."""
+
 from uuid import UUID
 
 from woassi.shared.application.pagination import PageResult
@@ -6,6 +8,8 @@ from woassi.shared.domain.audit import AuditEntry
 
 
 class ListAuditEntries:
+    """Lists a shop's audit entries, one page at a time."""
+
     def __init__(self, uow: UnitOfWork) -> None:
         self._uow = uow
 

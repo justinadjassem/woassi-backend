@@ -1,3 +1,5 @@
+"""Domain events of the orders module."""
+
 from dataclasses import dataclass
 from uuid import UUID
 

@@ -1,3 +1,5 @@
+"""Sending WhatsApp messages from a shop's number."""
+
 from uuid import UUID
 
 import structlog
@@ -26,6 +28,7 @@ log = structlog.get_logger()
 
 
 def _to_domain_error(error: SendError) -> DomainError:
+    """Turns a `SendError` into the domain error the caller sees."""
     if error.failure is SendFailure.OUTSIDE_WINDOW:
         return OutsideCustomerServiceWindow(
             "The customer last wrote more than 24 hours ago: use an approved template."

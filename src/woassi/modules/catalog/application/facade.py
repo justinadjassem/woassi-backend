@@ -1,3 +1,5 @@
+"""Use cases the catalog api and worker need, provided by the composition root."""
+
 from typing import Protocol
 
 from woassi.modules.catalog.application.use_cases.photos import (

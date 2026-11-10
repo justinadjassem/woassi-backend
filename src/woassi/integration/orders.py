@@ -1,3 +1,10 @@
+"""Inbound WhatsApp messages seen by `orders` and `customers`.
+
+Messaging hands every inbound message to `OrdersInboundHandler`, which turns carts into
+orders,
+button replies into order decisions, and keeps customer records up to date.
+"""
+
 from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
@@ -21,6 +28,7 @@ MAX_CART_LINES = 100
 
 
 def _phone(raw: str | None) -> PhoneNumber | None:
+    """Parses Meta's `from` (digits without the plus sign); None if missing or invalid."""
     if not raw:
         return None
     try:
@@ -30,6 +38,11 @@ def _phone(raw: str | None) -> PhoneNumber | None:
 
 
 def _cart_items(payload: Mapping[str, Any]) -> tuple[tuple[str, int], ...]:
+    """(retailer id, quantity) pairs of a cart message.
+
+    Malformed items are skipped, and ids and line count are capped: the payload comes from
+    outside.
+    """
     items = []
     for item in payload.get("product_items") or []:
         if not isinstance(item, Mapping):
@@ -70,6 +83,12 @@ class OrdersInboundHandler:
         self._clock = clock
 
     async def handle(self, shop_id: UUID, message: InboundMessage) -> None:
+        """Routes one inbound message.
+
+        - `system`: a customer changed number, so their BSUID changed;
+        - a button reply to one of our order messages: handled by `ReplyToOrder`;
+        - anything else: records the customer, and a cart (`order`) becomes an order.
+        """
         if message.type == "system":
             await self._system(shop_id, message)
             return
@@ -79,6 +98,8 @@ class OrdersInboundHandler:
             handled = await self._reply_to_order.execute(
                 shop_id=shop_id, payload=payload, context_message_id=message.context_message_id
             )
+            # False when the button does not answer one of our order messages: then it is handled
+            # like any other message below.
             if handled:
                 return
 
@@ -114,6 +135,7 @@ class OrdersInboundHandler:
             )
 
     async def _system(self, shop_id: UUID, message: InboundMessage) -> None:
+        """Moves a customer to their new BSUID after `user_changed_number`."""
         previous, current = message.payload.get("previous_user_id"), message.payload.get("user_id")
         if isinstance(previous, str) and isinstance(current, str) and previous != current:
             await self._change_user_id.execute(
@@ -121,6 +143,7 @@ class OrdersInboundHandler:
             )
 
     def _sent_at(self, message: InboundMessage) -> datetime:
+        """When the customer sent the message, as Meta stamped it; now if missing."""
         if message.timestamp:
             return datetime.fromtimestamp(message.timestamp, UTC)
         return self._clock.now()

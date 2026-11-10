@@ -1,3 +1,5 @@
+"""Use cases the messaging api needs, provided by the composition root."""
+
 from typing import Protocol
 
 from woassi.modules.messaging.application.use_cases.webhook import (

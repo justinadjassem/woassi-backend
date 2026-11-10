@@ -1,9 +1,13 @@
+"""Photo processing jobs, queued in arq."""
+
 from uuid import UUID
 
 from arq.connections import ArqRedis
 
 
 class ArqPhotoJobQueue:
+    """Queues `process_photo` jobs for the worker."""
+
     def __init__(self, pool: ArqRedis) -> None:
         self._pool = pool
 

@@ -19,6 +19,8 @@ CLOUD_API_PLATFORM = "CLOUD_API"
 
 
 class HttpxMetaOnboarding:
+    """`MetaOnboardingPort` on the Graph API."""
+
     def __init__(self, graph: GraphClient, *, app_id: str, app_secret: str) -> None:
         self._graph = graph
         self._app_id = app_id
@@ -26,6 +28,7 @@ class HttpxMetaOnboarding:
 
     async def exchange_code(self, code: str) -> str:
         # https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-customers-as-a-solution-partner
+        """Raises MetaError(INVALID_CODE) if Meta refuses the code."""
         data = await self._request(
             "GET",
             "/oauth/access_token",
@@ -65,6 +68,10 @@ class HttpxMetaOnboarding:
         self, waba_id: str, phone_number_id: str, token: str, catalog_id: str | None
     ) -> str | None:
         # https://developers.facebook.com/docs/graph-api/reference/whatsapp-business-account/product_catalogs/
+        """Returns the account's catalog, linking `catalog_id` first if it has none.
+
+        With a catalog, also shows it and enables the cart on the number.
+        """
         data = await self._request("GET", f"/{waba_id}/product_catalogs", token=token)
         catalogs = data.get("data")
         linked = catalogs[0].get("id") if isinstance(catalogs, list) and catalogs else None
@@ -90,6 +97,7 @@ class HttpxMetaOnboarding:
 
     async def sync_business_app_data(self, phone_number_id: str, token: str) -> None:
         # https://developers.facebook.com/documentation/business-messaging/whatsapp/embedded-signup/onboarding-business-app-users/
+        """Requests the contacts sync, then the history sync."""
         for sync_type in ("smb_app_state_sync", "history"):
             data = await self._request(
                 "POST",
@@ -108,6 +116,7 @@ class HttpxMetaOnboarding:
 
     async def token_is_valid(self, token: str) -> bool:
         # https://developers.facebook.com/docs/graph-api/reference/debug_token/
+        """Asks `debug_token`, authenticated with the app token."""
         data = await self._request(
             "GET",
             "/debug_token",
@@ -126,6 +135,12 @@ class HttpxMetaOnboarding:
         token: str | None = None,
         invalid_request: MetaFailure = MetaFailure.REJECTED,
     ) -> dict[str, Any]:
+        """Sends a Graph request and returns its JSON body.
+
+        Raises MetaError: UNAVAILABLE for no answer or a 5xx, INVALID_TOKEN for code 190,
+        otherwise
+        `invalid_request`.
+        """
         try:
             response = await self._graph.request(
                 method, path, params=params, json=json, token=token

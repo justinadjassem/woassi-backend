@@ -1,3 +1,5 @@
+"""Redis rate limiter, using Lua scripts so each step is atomic."""
+
 from typing import Any, cast
 
 from arq.connections import ArqRedis
@@ -28,13 +30,16 @@ class RedisRateLimiter:
         self._redis = redis
 
     async def hit(self, key: str, limit: int, window_s: int) -> int | None:
+        """Counts one attempt. Returns None if allowed, else the seconds before the window ends."""
         result = await cast(Any, self._redis.eval(_HIT, 1, self._name(key), str(window_s)))
         count, ttl = int(result[0]), int(result[1])
         return None if count <= limit else max(ttl, 1)
 
     async def forgive(self, key: str) -> None:
+        """Takes one attempt back, if the window has not expired."""
         await cast(Any, self._redis.eval(_FORGIVE, 1, self._name(key)))
 
     @staticmethod
     def _name(key: str) -> str:
+        """Redis key of a rate limit key."""
         return f"rate:{key}"

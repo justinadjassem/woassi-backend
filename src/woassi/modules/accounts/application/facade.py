@@ -1,3 +1,5 @@
+"""Use cases the accounts api needs, provided by the composition root (`Container`)."""
+
 from typing import Protocol
 
 from woassi.modules.accounts.application.use_cases.password import (

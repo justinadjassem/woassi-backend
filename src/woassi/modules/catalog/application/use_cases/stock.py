@@ -1,3 +1,5 @@
+"""Stock reservation and release, used by the orders module."""
+
 from collections.abc import Mapping
 from dataclasses import dataclass
 from uuid import UUID
@@ -7,6 +9,8 @@ from woassi.modules.catalog.application.ports import CatalogUnitOfWork
 
 @dataclass(frozen=True, slots=True)
 class ReservedItem:
+    """Outcome for one cart line: how much was requested, and how much was reserved."""
+
     retailer_id: str
     product_id: UUID | None  # None for an unknown product
     name: str
@@ -25,6 +29,11 @@ class ReserveStock:
         self._uow = uow
 
     async def execute(self, *, shop_id: UUID, requested: Mapping[str, int]) -> list[ReservedItem]:
+        """Reserves up to `requested` units per retailer id.
+
+        An unknown or inactive product reserves nothing; the caller decides what to do with a
+        partial cart.
+        """
         async with self._uow as uow:
             products = {
                 product.retailer_id: product
@@ -57,6 +66,8 @@ class ReserveStock:
 
 
 class ReleaseStock:
+    """Gives reserved units back to the stock, e.g. when an order is closed."""
+
     def __init__(self, uow: CatalogUnitOfWork) -> None:
         self._uow = uow
 

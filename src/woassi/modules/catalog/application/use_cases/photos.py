@@ -1,3 +1,9 @@
+"""Product photos: upload request, upload confirmation, and processing by the worker.
+
+The original goes to the private uploads bucket, and the WebP variants to the public products
+bucket, as Meta needs stable URLs.
+"""
+
 from uuid import UUID
 
 from woassi.modules.catalog.application.dto import UploadPhoto
@@ -28,6 +34,7 @@ VARIANT_SIZES = (400, 1024)
 
 
 async def _load_product(uow: CatalogUnitOfWork, shop_id: UUID, product_id: UUID) -> Product:
+    """The shop's product; raises ProductNotFound otherwise."""
     product = await uow.products.get(shop_id, product_id)
     if product is None:
         raise ProductNotFound(f"Product {product_id} not found.")
@@ -35,6 +42,8 @@ async def _load_product(uow: CatalogUnitOfWork, shop_id: UUID, product_id: UUID)
 
 
 class RequestPhotoUpload:
+    """Adds a pending photo to a product and returns a presigned upload URL."""
+
     def __init__(
         self,
         uow: CatalogUnitOfWork,
@@ -53,6 +62,13 @@ class RequestPhotoUpload:
     async def execute(
         self, *, shop_id: UUID, product_id: UUID, content_type: str, size: int
     ) -> UploadPhoto:
+        """Checks the declared type and size, then reserves a photo slot.
+
+        Raises:
+            InvalidPhoto: unsupported type, or size out of bounds.
+            ProductNotFound: no such product in this shop.
+            TooManyPhotos: the product already has the maximum number of photos.
+        """
         if content_type not in ALLOWED_CONTENT_TYPES:
             raise InvalidPhoto(f"Unsupported file type: {content_type}.")
         if size <= 0 or size > self._max_size_bytes:
@@ -71,6 +87,8 @@ class RequestPhotoUpload:
 
 
 class ConfirmPhoto:
+    """Called once the browser has uploaded the file: checks it, then queues its processing."""
+
     def __init__(
         self,
         uow: CatalogUnitOfWork,
@@ -85,6 +103,11 @@ class ConfirmPhoto:
         self._max_size_bytes = max_size_bytes
 
     async def execute(self, *, shop_id: UUID, product_id: UUID, photo_id: UUID) -> None:
+        """Raises:
+        PhotoAlreadyProcessed: the photo is no longer pending.
+        InvalidPhoto: the file was not uploaded, or is too large (then the photo is
+        rejected).
+        """
         async with self._uow as uow:
             product = await _load_product(uow, shop_id, product_id)
             photo = product.photo(photo_id)
@@ -122,6 +145,10 @@ class ProcessPhoto:
         self._processor = processor
 
     async def execute(self, photo_id: UUID) -> None:
+        """Generates the 400 px and 1024 px WebP variants, then deletes the original.
+
+        An unreadable or missing original rejects the photo instead of failing the job.
+        """
         async with self._uow as uow:
             product = await uow.products.get_by_photo(photo_id)
             if product is None:

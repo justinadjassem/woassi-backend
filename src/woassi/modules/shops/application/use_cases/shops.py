@@ -1,3 +1,5 @@
+"""Shop creation, reading, update and archiving, and lookups for other modules."""
+
 from collections.abc import Callable
 from uuid import UUID
 
@@ -19,6 +21,12 @@ SLUG_ATTEMPTS = 5
 
 
 class CreateShop:
+    """Creates a shop with a slug made from its name.
+
+    Takes a Unit of Work factory, not a Unit of Work: each slug attempt needs a fresh
+    transaction.
+    """
+
     def __init__(
         self, make_uow: Callable[[], ShopsUnitOfWork], images: StoragePort, clock: Clock
     ) -> None:
@@ -35,6 +43,7 @@ class CreateShop:
         city: str = "",
         address: str = "",
     ) -> ShopView:
+        """Tries the plain slug, then up to 4 random suffixes; raises SlugTaken if all are taken."""
         slug = slugify(name)
         for attempt in range(SLUG_ATTEMPTS):
             shop = Shop.create(
@@ -58,6 +67,8 @@ class CreateShop:
 
 
 class ListShops:
+    """Lists an account's shops, one page at a time."""
+
     def __init__(self, uow: ShopsUnitOfWork, images: StoragePort) -> None:
         self._uow = uow
         self._images = images
@@ -75,6 +86,8 @@ class ListShops:
 
 
 class GetShop:
+    """Returns one shop."""
+
     def __init__(self, uow: ShopsUnitOfWork, images: StoragePort) -> None:
         self._uow = uow
         self._images = images
@@ -86,6 +99,8 @@ class GetShop:
 
 
 class UpdateShop:
+    """Updates a shop's profile; only the arguments given change."""
+
     def __init__(self, uow: ShopsUnitOfWork, images: StoragePort) -> None:
         self._uow = uow
         self._images = images
@@ -127,6 +142,7 @@ class ArchiveShop:
         self._clock = clock
 
     async def execute(self, shop_id: UUID) -> None:
+        """Unsubscribes from Meta (best effort) before archiving, outside any transaction."""
         async with self._uow as uow:
             shop = await load_shop(uow, shop_id)
         await unsubscribe_quietly(shop, self._meta, self._cipher)
@@ -140,6 +156,8 @@ class ArchiveShop:
 
 
 class CheckShopOwnership:
+    """Tells whether an account owns a shop, for `get_authorized_shop`."""
+
     def __init__(self, uow: ShopsUnitOfWork) -> None:
         self._uow = uow
 
@@ -150,6 +168,8 @@ class CheckShopOwnership:
 
 
 class ResolveShopByPhoneNumber:
+    """Finds the shop behind a WhatsApp number, to route a webhook."""
+
     def __init__(self, uow: ShopsUnitOfWork, cipher: SecretCipher) -> None:
         self._uow = uow
         self._cipher = cipher
@@ -162,6 +182,8 @@ class ResolveShopByPhoneNumber:
 
 
 class ResolveShopConnection:
+    """Gives a shop's WhatsApp connection, to send from its number."""
+
     def __init__(self, uow: ShopsUnitOfWork, cipher: SecretCipher) -> None:
         self._uow = uow
         self._cipher = cipher
@@ -174,6 +196,7 @@ class ResolveShopConnection:
 
 
 def _routing(shop: Shop | None, cipher: SecretCipher) -> ShopRouting | None:
+    """Routing data of an ACTIVE shop with a CONNECTED number, token decrypted; None otherwise."""
     if shop is None or shop.status is not ShopStatus.ACTIVE or not shop.whatsapp_connected:
         return None
     whatsapp = shop.whatsapp
@@ -188,6 +211,8 @@ def _routing(shop: Shop | None, cipher: SecretCipher) -> ShopRouting | None:
 
 
 class GetShopOrderProfile:
+    """Returns what the orders module needs to know about a shop."""
+
     def __init__(self, uow: ShopsUnitOfWork) -> None:
         self._uow = uow
 

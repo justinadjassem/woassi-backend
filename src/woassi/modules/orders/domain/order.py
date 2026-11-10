@@ -1,3 +1,10 @@
+"""Orders and their life cycle.
+
+AWAITING_CUSTOMER (partial cart) -> AWAITING_MERCHANT -> CONFIRMED, or closed: REJECTED,
+CANCELLED or EXPIRED. A complete cart skips AWAITING_CUSTOMER; an automatic validation skips
+AWAITING_MERCHANT.
+"""
+
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta
 from enum import StrEnum
@@ -10,6 +17,8 @@ from woassi.shared.domain.values import Amount
 
 
 class OrderStatus(StrEnum):
+    """Where an order stands. Only the two AWAITING statuses are open."""
+
     AWAITING_CUSTOMER = "AWAITING_CUSTOMER"  # part of the cart is missing: does the rest do?
     AWAITING_MERCHANT = "AWAITING_MERCHANT"
     CONFIRMED = "CONFIRMED"
@@ -22,6 +31,8 @@ OPEN = frozenset({OrderStatus.AWAITING_CUSTOMER, OrderStatus.AWAITING_MERCHANT})
 
 
 class ClosingReason(StrEnum):
+    """Why an order closed without being confirmed."""
+
     OUT_OF_STOCK = "OUT_OF_STOCK"
     MERCHANT_REFUSED = "MERCHANT_REFUSED"
     CUSTOMER_DECLINED = "CUSTOMER_DECLINED"
@@ -29,6 +40,8 @@ class ClosingReason(StrEnum):
 
 
 class DecidedBy(StrEnum):
+    """Who confirmed or closed the order."""
+
     MERCHANT = "MERCHANT"
     AUTOMATIC = "AUTOMATIC"
     CUSTOMER = "CUSTOMER"
@@ -36,16 +49,21 @@ class DecidedBy(StrEnum):
 
 
 class ValidationMode(StrEnum):
+    """MANUAL: the merchant confirms every order. AUTOMATIC: up to a maximum amount."""
+
     MANUAL = "MANUAL"
     AUTOMATIC = "AUTOMATIC"
 
 
 @dataclass(frozen=True, slots=True)
 class ValidationPolicy:
+    """How a shop validates orders."""
+
     mode: ValidationMode
     max_amount: Amount | None = None
 
     def needs_merchant(self, total: Amount) -> bool:
+        """True if an order of `total` must wait for the merchant."""
         if self.mode is ValidationMode.MANUAL:
             return True
         return self.max_amount is not None and total > self.max_amount
@@ -53,6 +71,8 @@ class ValidationPolicy:
 
 @dataclass(frozen=True, slots=True)
 class Deadlines:
+    """When to remind the merchant, counted from the order reaching them, and when to expire."""
+
     reminder_1_minutes: int = 15
     reminder_2_minutes: int = 60
     expiration_hours: int = 24
@@ -60,6 +80,8 @@ class Deadlines:
 
 @dataclass(frozen=True, slots=True)
 class OrderLine:
+    """One cart line, with the price at the time of the order."""
+
     retailer_id: str
     name: str
     unit_price: Amount
@@ -69,20 +91,26 @@ class OrderLine:
 
     @property
     def subtotal(self) -> Amount:
+        """Price of the reserved quantity."""
         return self.unit_price * self.quantity
 
     @property
     def complete(self) -> bool:
+        """True if everything requested could be reserved."""
         return self.quantity >= self.requested
 
 
 class DueAction(StrEnum):
+    """What the cron has to do with an order now."""
+
     REMIND = "REMIND"
     EXPIRE = "EXPIRE"
 
 
 @dataclass(slots=True)
 class Order(Entity):
+    """An order from a WhatsApp cart. Numbered per shop."""
+
     id: UUID
     shop_id: UUID
     number: int
@@ -117,6 +145,12 @@ class Order(Entity):
         deadlines: Deadlines,
         now: datetime,
     ) -> "Order":
+        """Creates the order from reserved lines.
+
+        Nothing reserved: rejected (out of stock). Everything reserved: submitted for
+        validation.
+        Otherwise it waits for the customer to accept the rest.
+        """
         order = cls(
             id=uuid4(),
             shop_id=shop_id,
@@ -138,6 +172,7 @@ class Order(Entity):
 
     @property
     def total(self) -> Amount:
+        """Sum of the line subtotals."""
         total = Amount(0)
         for line in self.lines:
             total = total + line.subtotal
@@ -145,14 +180,17 @@ class Order(Entity):
 
     @property
     def is_open(self) -> bool:
+        """True while the order waits for the customer or the merchant."""
         return self.status in OPEN
 
     @property
     def available_lines(self) -> tuple[OrderLine, ...]:
+        """Lines with something reserved."""
         return tuple(line for line in self.lines if line.quantity)
 
     @property
     def missing_lines(self) -> tuple[OrderLine, ...]:
+        """Lines with less reserved than requested."""
         return tuple(line for line in self.lines if not line.complete)
 
     @property
@@ -171,23 +209,28 @@ class Order(Entity):
         self._submit(policy, now)
 
     def decline_offer(self, now: datetime) -> None:
+        """The customer refuses the partial order: it is cancelled."""
         self._require(OrderStatus.AWAITING_CUSTOMER)
         self._close(OrderStatus.CANCELLED, ClosingReason.CUSTOMER_DECLINED, DecidedBy.CUSTOMER, now)
 
     def confirm(self, now: datetime, by: DecidedBy = DecidedBy.MERCHANT) -> None:
+        """The merchant accepts. Raises OrderNotOpen unless awaiting the merchant."""
         self._require(OrderStatus.AWAITING_MERCHANT)
         self._confirm(by, now)
 
     def refuse(self, now: datetime) -> None:
+        """The merchant refuses. Raises OrderNotOpen unless awaiting the merchant."""
         self._require(OrderStatus.AWAITING_MERCHANT)
         self._close(OrderStatus.REJECTED, ClosingReason.MERCHANT_REFUSED, DecidedBy.MERCHANT, now)
 
     def expire(self, now: datetime) -> None:
+        """Nobody answered in time. Raises OrderNotOpen if already closed."""
         if not self.is_open:
             raise OrderNotOpen(f"Order {self.number} is {self.status.value}.")
         self._close(OrderStatus.EXPIRED, ClosingReason.EXPIRED, DecidedBy.SYSTEM, now)
 
     def due_action(self, now: datetime) -> DueAction | None:
+        """EXPIRE past the expiry, REMIND past the next reminder, None otherwise."""
         if not self.is_open:
             return None
         if now >= self.expires_at:
@@ -213,12 +256,15 @@ class Order(Entity):
         return min(d for d in (self.next_reminder_at, self.expires_at) if d is not None)
 
     def record_merchant_message(self, message_id: str) -> None:
+        """Remembers a message sent to the merchant, whose buttons are then trusted."""
         self.merchant_message_ids.append(message_id)
 
     def record_offer_message(self, message_id: str) -> None:
+        """Remembers the offer sent to the customer, whose buttons are then trusted."""
         self.offer_message_id = message_id
 
     def _submit(self, policy: ValidationPolicy, now: datetime) -> None:
+        """Confirms automatically if the policy allows it, else waits for the merchant."""
         if policy.needs_merchant(self.total):
             self.status = OrderStatus.AWAITING_MERCHANT
             self.awaiting_merchant_since = now
@@ -227,6 +273,7 @@ class Order(Entity):
             self._confirm(DecidedBy.AUTOMATIC, now)
 
     def _confirm(self, by: DecidedBy, now: datetime) -> None:
+        """Confirms and records `OrderConfirmed`, for billing."""
         self.status = OrderStatus.CONFIRMED
         self.decided_by = by
         self.closed_at = now
@@ -238,6 +285,7 @@ class Order(Entity):
     def _close(
         self, status: OrderStatus, reason: ClosingReason, by: DecidedBy, now: datetime
     ) -> None:
+        """Closes without confirming and records `OrderClosed`."""
         self.status = status
         self.closing_reason = reason
         self.decided_by = by
@@ -246,5 +294,6 @@ class Order(Entity):
         self.record_event(OrderClosed(order_id=self.id, shop_id=self.shop_id, status=status.value))
 
     def _require(self, status: OrderStatus) -> None:
+        """Raises OrderNotOpen unless the order is in `status`."""
         if self.status is not status:
             raise OrderNotOpen(f"Order {self.number} is {self.status.value}.")

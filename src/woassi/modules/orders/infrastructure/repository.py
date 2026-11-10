@@ -1,3 +1,5 @@
+"""SQLAlchemy implementation of the order repository."""
+
 from collections.abc import Callable, Sequence
 from datetime import datetime
 from typing import Any
@@ -23,6 +25,7 @@ from woassi.shared.domain.values import Amount
 
 
 def _line_to_json(line: OrderLine) -> dict[str, Any]:
+    """Serializes an order line for the `lines` JSON column."""
     return {
         "retailer_id": line.retailer_id,
         "name": line.name,
@@ -34,6 +37,7 @@ def _line_to_json(line: OrderLine) -> dict[str, Any]:
 
 
 def _line_from_json(data: dict[str, Any]) -> OrderLine:
+    """Parses an order line written by `_line_to_json`."""
     return OrderLine(
         retailer_id=data["retailer_id"],
         name=data["name"],
@@ -45,6 +49,7 @@ def _line_from_json(data: dict[str, Any]) -> OrderLine:
 
 
 def _to_domain(model: OrderModel) -> Order:
+    """Converts a row to a domain `Order`."""
     return Order(
         id=model.id,
         shop_id=model.shop_id,
@@ -69,6 +74,7 @@ def _to_domain(model: OrderModel) -> Order:
 
 
 def _copy(order: Order, model: OrderModel) -> OrderModel:
+    """Copies every field of `order` onto `model`, `next_deadline` included, and returns `model`."""
     model.id = order.id
     model.shop_id = order.shop_id
     model.number = order.number
@@ -98,11 +104,14 @@ def _copy(order: Order, model: OrderModel) -> OrderModel:
 
 
 class SqlAlchemyOrderRepository:
+    """`OrderRepository` on SQLAlchemy. Saved orders are tracked for their events."""
+
     def __init__(self, session: AsyncSession, track: Callable[[Entity], None]) -> None:
         self._session = session
         self._track = track
 
     async def add(self, order: Order) -> None:
+        """Inserts the order; raises DuplicateOrder if its cart message already has one."""
         self._session.add(_copy(order, OrderModel()))
         try:
             await self._session.flush()
@@ -143,6 +152,7 @@ class SqlAlchemyOrderRepository:
         return (await self._session.scalar(query)) or 0
 
     async def list_due(self, now: datetime, limit: int) -> Sequence[tuple[UUID, UUID]]:
+        """Open orders whose next deadline has passed, earliest first."""
         rows = await self._session.execute(
             select(OrderModel.shop_id, OrderModel.id)
             .where(OrderModel.next_deadline <= now)
@@ -165,6 +175,7 @@ class SqlAlchemyOrderRepository:
         return int(result.scalar_one())
 
     async def save(self, order: Order) -> None:
+        """Updates an existing order; raises LookupError if it does not exist."""
         model = await self._session.get(OrderModel, order.id)
         if model is None:
             raise LookupError(f"Order {order.id} does not exist.")

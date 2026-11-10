@@ -1,3 +1,5 @@
+"""Application settings, read from the environment and from `.env`."""
+
 from functools import lru_cache
 from typing import Annotated, Self
 
@@ -6,6 +8,10 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
 class Settings(BaseSettings):
+    """Every setting of the API and the worker. Field names match the environment variables,
+    case-insensitively: `database_url` reads `DATABASE_URL`.
+    """
+
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     app_env: str = "dev"
@@ -48,12 +54,14 @@ class Settings(BaseSettings):
     @field_validator("cors_origins", "woassi_encryption_keys", mode="before")
     @classmethod
     def _split_comma_list(cls, value: object) -> object:
+        """Accepts a comma-separated string for list settings, e.g. `CORS_ORIGINS=a,b`."""
         if isinstance(value, str):
             return [item.strip() for item in value.split(",") if item.strip()]
         return value
 
     @model_validator(mode="after")
     def _require_encryption_key(self) -> Self:
+        """Refuses to start without a key to encrypt stored secrets."""
         if not self.encryption_keys:
             raise ValueError("Set WOASSI_ENCRYPTION_KEY or WOASSI_ENCRYPTION_KEYS.")
         return self
@@ -68,4 +76,5 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
+    """The settings, loaded once per process."""
     return Settings()  # values read from the environment

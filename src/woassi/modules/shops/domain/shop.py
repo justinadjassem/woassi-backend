@@ -1,3 +1,5 @@
+"""The shop aggregate: profile, settings, WhatsApp connection and receiving account."""
+
 import re
 import secrets
 import unicodedata
@@ -27,36 +29,46 @@ MAX_SLUG_LENGTH = 60
 
 
 def slugify(name: str) -> str:
+    """URL-friendly slug of `name`: ASCII, lowercase, dashes, at most 60 characters."""
     ascii_name = unicodedata.normalize("NFKD", name).encode("ascii", "ignore").decode()
     slug = re.sub(r"[^a-z0-9]+", "-", ascii_name.lower()).strip("-")
     return slug[:MAX_SLUG_LENGTH].strip("-") or "shop"
 
 
 def with_random_suffix(slug: str) -> str:
+    """`slug` with 6 random hex characters, to retry after a collision."""
     return f"{slug}-{secrets.token_hex(3)}"
 
 
 def logo_key(shop_id: UUID, logo_id: UUID) -> str:
+    """Object key of a shop logo, in the public bucket."""
     return f"shops/{shop_id}/logo/{logo_id}.webp"
 
 
 def original_logo_key(shop_id: UUID, logo_id: UUID) -> str:
+    """Object key of an uploaded logo, in the private uploads bucket."""
     return f"shops/{shop_id}/logo/originals/{logo_id}"
 
 
 class ShopStatus(StrEnum):
+    """DRAFT until a number is connected, then ACTIVE. Only ACTIVE shops send and receive."""
+
     DRAFT = "DRAFT"
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
 
 
 class PaymentMode(StrEnum):
+    """How a shop's customers can pay."""
+
     CASH = "CASH"
     MIXX = "MIXX"
     MOOV = "MOOV"
 
 
 class WhatsAppStatus(StrEnum):
+    """State of a shop's WhatsApp connection."""
+
     IN_PROGRESS = "IN_PROGRESS"
     CONNECTED = "CONNECTED"
     ERROR = "ERROR"
@@ -64,6 +76,8 @@ class WhatsAppStatus(StrEnum):
 
 
 class Language(StrEnum):
+    """Language of the messages sent to the shop's customers and merchant."""
+
     FR = "fr"
     EN = "en"
 
@@ -76,12 +90,16 @@ class ValidationMode(StrEnum):
 
 
 class Operator(StrEnum):
+    """Mobile money operator of a receiving account."""
+
     MIXX = "MIXX"
     MOOV = "MOOV"
 
 
 @dataclass(frozen=True, slots=True)
 class InvoiceDetails:
+    """Legal details printed on the shop's invoices."""
+
     company_name: str = ""
     tax_id: str = ""  # NIF
     trade_register: str = ""  # RCCM
@@ -91,6 +109,8 @@ class InvoiceDetails:
 
 @dataclass(frozen=True, slots=True)
 class ShopSettings:
+    """Settings of a shop. Validated as a whole, as some fields depend on each other."""
+
     notification_number: PhoneNumber | None = None
     payment_modes: tuple[PaymentMode, ...] = (PaymentMode.CASH,)
     reminder_1_minutes: int = 15
@@ -119,6 +139,8 @@ class ShopSettings:
 
 @dataclass(slots=True)
 class WhatsAppAccount:
+    """A shop's WhatsApp connection. The access token is stored encrypted."""
+
     waba_id: str
     status: WhatsAppStatus
     # Only set once Meta has confirmed that the merchant's token gives access to this number.
@@ -133,6 +155,11 @@ class WhatsAppAccount:
 
 @dataclass(frozen=True, slots=True)
 class ReceivingAccount:
+    """The mobile money account that receives the shop's payments.
+
+    `verified` is reset whenever the operator or the number changes.
+    """
+
     operator: Operator
     number: PhoneNumber
     holder_name: str
@@ -145,6 +172,7 @@ class ReceivingAccount:
 
 
 def _required(value: str, label: str) -> str:
+    """Strips `value`; raises InvalidShop if nothing is left."""
     value = value.strip()
     if not value:
         raise InvalidShop(f"{label} is required.")
@@ -153,6 +181,8 @@ def _required(value: str, label: str) -> str:
 
 @dataclass(slots=True)
 class Shop(Entity):
+    """A shop of an account. Settings, WhatsApp and receiving account load and save with it."""
+
     id: UUID
     account_id: UUID
     name: str
@@ -180,6 +210,7 @@ class Shop(Entity):
         address: str,
         now: datetime,
     ) -> "Shop":
+        """Creates a DRAFT shop with default settings, and records `ShopCreated`."""
         shop = cls(
             id=uuid4(),
             account_id=account_id,
@@ -199,9 +230,11 @@ class Shop(Entity):
 
     @property
     def whatsapp_connected(self) -> bool:
+        """True if the shop's number is CONNECTED."""
         return self.whatsapp is not None and self.whatsapp.status is WhatsAppStatus.CONNECTED
 
     def activate(self) -> None:
+        """Raises ShopNotActivatable without a connected number, or if suspended."""
         if not self.whatsapp_connected:
             raise ShopNotActivatable("A shop needs a connected WhatsApp number to go active.")
         if self.status is ShopStatus.SUSPENDED:
@@ -209,10 +242,12 @@ class Shop(Entity):
         self.status = ShopStatus.ACTIVE
 
     def _back_to_draft(self) -> None:
+        """An ACTIVE shop that loses its number goes back to DRAFT."""
         if self.status is ShopStatus.ACTIVE:
             self.status = ShopStatus.DRAFT
 
     def start_whatsapp_connection(self, waba_id: str) -> None:
+        """Raises WhatsAppAlreadyConnected if a number is already connected."""
         if self.whatsapp_connected:
             raise WhatsAppAlreadyConnected("This shop already has a connected number.")
         self.whatsapp = WhatsAppAccount(waba_id=waba_id, status=WhatsAppStatus.IN_PROGRESS)
@@ -228,6 +263,9 @@ class Shop(Entity):
         encrypted_token: str,
         now: datetime,
     ) -> None:
+        """Stores the confirmed connection, activates a DRAFT shop, and records
+        `WhatsAppConnected`.
+        """
         self.whatsapp = WhatsAppAccount(
             waba_id=waba_id,
             status=WhatsAppStatus.CONNECTED,
@@ -260,8 +298,10 @@ class Shop(Entity):
         self._back_to_draft()
 
     def set_receiving_account(self, account: ReceivingAccount | None) -> None:
+        """Sets or removes (None) the receiving account, and records `ReceivingAccountChanged`."""
         self.receiving_account = account
         self.record_event(ReceivingAccountChanged(shop_id=self.id))
 
     def archive(self, now: datetime) -> None:
+        """Hides the shop everywhere. Rows are kept, so invoices stay readable."""
         self.archived_at = now

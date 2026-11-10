@@ -1,3 +1,5 @@
+"""SQLAlchemy models of the messaging module."""
+
 from datetime import datetime
 from uuid import UUID
 
@@ -8,6 +10,8 @@ from woassi.shared.infrastructure.db.base import Base
 
 
 class MessageTemplateModel(Base):
+    """Row of `message_templates`: one per shop, template name and language."""
+
     __tablename__ = "message_templates"
 
     shop_id: Mapped[UUID] = mapped_column(primary_key=True)
@@ -20,6 +24,8 @@ class MessageTemplateModel(Base):
 
 
 class OutboundMessageModel(Base):
+    """Row of `outbound_messages`, keyed by Meta's message id (wamid)."""
+
     __tablename__ = "outbound_messages"
     __table_args__ = (
         CheckConstraint(

@@ -18,6 +18,8 @@ MAX_PARAMETER = 600
 
 @dataclass(frozen=True, slots=True)
 class TemplateText:
+    """A template the orders module needs Meta to approve for every shop."""
+
     name: str
     language: str
     body: str
@@ -96,6 +98,7 @@ _TEXTS: dict[str, dict[str, str]] = {
 
 
 def text(language: str, key: str, **values: object) -> str:
+    """Message `key` in `language` (French if unsupported), filled with `values`."""
     texts = _TEXTS.get(language, _TEXTS[DEFAULT_LANGUAGE])
     return texts[key].format(**values)
 
@@ -108,4 +111,5 @@ def summary(lines: Sequence[OrderLine], *, requested: bool = False) -> str:
 
 
 def amount(value: Amount) -> str:
+    """An amount as shown in messages: `12 500 FCFA`."""
     return str(value)

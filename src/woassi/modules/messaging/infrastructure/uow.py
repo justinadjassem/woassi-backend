@@ -1,3 +1,5 @@
+"""Unit of Work of the messaging module."""
+
 from woassi.modules.messaging.application.ports import (
     Inbox,
     MessageTemplateRepository,
@@ -12,6 +14,8 @@ from woassi.shared.infrastructure.db.uow import SqlAlchemyUnitOfWork
 
 
 class SqlAlchemyMessagingUoW(SqlAlchemyUnitOfWork):
+    """Gives the messaging repositories, all on this Unit of Work's session."""
+
     @property
     def inbox(self) -> Inbox:
         return SqlAlchemyInbox(self._active_session())

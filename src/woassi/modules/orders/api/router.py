@@ -1,3 +1,9 @@
+"""Order routes of a shop.
+
+`accept` and `refuse` are the dashboard's way to decide, and the only one without a
+notification number or an approved template.
+"""
+
 from datetime import datetime
 from uuid import UUID
 
@@ -23,6 +29,8 @@ router = APIRouter(
 
 
 class OrderLineResponse(BaseModel):
+    """One cart line: `requested` by the customer, `quantity` reserved. Amounts in XOF."""
+
     retailer_id: str
     product_id: UUID | None
     name: str
@@ -33,6 +41,7 @@ class OrderLineResponse(BaseModel):
 
     @classmethod
     def from_line(cls, line: OrderLine) -> "OrderLineResponse":
+        """Builds the response from a domain `OrderLine`."""
         return cls(
             retailer_id=line.retailer_id,
             product_id=line.product_id,
@@ -45,6 +54,8 @@ class OrderLineResponse(BaseModel):
 
 
 class OrderResponse(BaseModel):
+    """An order as returned by the API. Amounts in XOF."""
+
     id: UUID
     number: int
     customer_id: UUID
@@ -60,6 +71,7 @@ class OrderResponse(BaseModel):
 
     @classmethod
     def from_order(cls, order: Order) -> "OrderResponse":
+        """Builds the response from a domain `Order`."""
         return cls(
             id=order.id,
             number=order.number,
@@ -84,6 +96,7 @@ async def list_orders(
     offset: Offset = 0,
     limit: Limit = 50,
 ) -> Page[OrderResponse]:
+    """Lists the shop's orders, newest first, optionally filtered by status."""
     result = await orders.list_orders().execute(
         shop_id=shop_id, status=status, offset=offset, limit=limit
     )
@@ -97,6 +110,7 @@ async def list_orders(
 
 @router.get("/{order_id}")
 async def get_order(shop_id: UUID, order_id: UUID, orders: OrdersDep) -> OrderResponse:
+    """One order of the shop."""
     order = await orders.get_order().execute(shop_id=shop_id, order_id=order_id)
     return OrderResponse.from_order(order)
 
@@ -109,6 +123,7 @@ async def _decide(
     account_id: UUID,
     orders: OrdersDep,
 ) -> OrderResponse:
+    """Accepts or refuses an order awaiting the merchant, recording who did it."""
     order = await orders.decide_order().execute(
         shop_id=shop_id,
         order_id=order_id,
@@ -123,6 +138,7 @@ async def _decide(
 async def accept_order(
     shop_id: UUID, order_id: UUID, request: Request, account: CurrentAccount, orders: OrdersDep
 ) -> OrderResponse:
+    """Confirms an order awaiting the merchant. 409 if it is no longer awaiting them."""
     return await _decide(shop_id, order_id, True, request, account.id, orders)
 
 
@@ -130,4 +146,5 @@ async def accept_order(
 async def refuse_order(
     shop_id: UUID, order_id: UUID, request: Request, account: CurrentAccount, orders: OrdersDep
 ) -> OrderResponse:
+    """Refuses an order awaiting the merchant and gives its stock back."""
     return await _decide(shop_id, order_id, False, request, account.id, orders)

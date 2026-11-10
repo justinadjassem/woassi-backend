@@ -1,3 +1,5 @@
+"""Data returned by the shops use cases."""
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
@@ -20,6 +22,8 @@ from woassi.shared.application.ports import SecretCipher, StoragePort
 
 @dataclass(frozen=True, slots=True)
 class ShopView:
+    """Read-only view of a shop."""
+
     id: UUID
     name: str
     slug: str
@@ -32,6 +36,7 @@ class ShopView:
 
 
 def shop_view(shop: Shop, images: StoragePort) -> ShopView:
+    """Builds the view of `shop`, with its logo's public URL."""
     return ShopView(
         id=shop.id,
         name=shop.name,
@@ -47,6 +52,8 @@ def shop_view(shop: Shop, images: StoragePort) -> ShopView:
 
 @dataclass(frozen=True, slots=True)
 class SettingsView:
+    """Read-only view of a shop's settings."""
+
     notification_number: str | None
     payment_modes: tuple[PaymentMode, ...]
     reminder_1_minutes: int
@@ -61,6 +68,7 @@ class SettingsView:
 
 
 def settings_view(settings: ShopSettings) -> SettingsView:
+    """Builds the view of `settings`."""
     number = settings.notification_number
     return SettingsView(
         notification_number=number.value if number else None,
@@ -92,6 +100,7 @@ class WhatsAppView:
 
 
 def whatsapp_view(account: WhatsAppAccount) -> WhatsAppView:
+    """Builds the view of a WhatsApp connection."""
     return WhatsAppView(
         status=account.status,
         waba_id=account.waba_id,
@@ -106,6 +115,8 @@ def whatsapp_view(account: WhatsAppAccount) -> WhatsAppView:
 
 @dataclass(frozen=True, slots=True)
 class ReceivingAccountView:
+    """Read-only view of a receiving account, merchant id decrypted."""
+
     operator: Operator
     number: str
     holder_name: str
@@ -114,6 +125,7 @@ class ReceivingAccountView:
 
 
 def receiving_account_view(account: ReceivingAccount, cipher: SecretCipher) -> ReceivingAccountView:
+    """Builds the view of `account`, decrypting the aggregator merchant id."""
     encrypted = account.encrypted_merchant_id
     return ReceivingAccountView(
         operator=account.operator,
@@ -126,6 +138,8 @@ def receiving_account_view(account: ReceivingAccount, cipher: SecretCipher) -> R
 
 @dataclass(frozen=True, slots=True)
 class LogoUpload:
+    """Where to upload a new logo, and for how long the URL is valid."""
+
     logo_id: UUID
     upload_url: str
     expire_s: int
@@ -133,6 +147,8 @@ class LogoUpload:
 
 @dataclass(frozen=True, slots=True)
 class ShopRouting:
+    """A connected shop's WhatsApp identifiers and decrypted token. Never log it."""
+
     shop_id: UUID
     waba_id: str
     phone_number_id: str
@@ -156,6 +172,7 @@ class ShopOrderProfile:
 
 
 def order_profile(shop: Shop) -> ShopOrderProfile:
+    """Builds the order profile of `shop`."""
     settings = shop.settings
     number = settings.notification_number
     return ShopOrderProfile(

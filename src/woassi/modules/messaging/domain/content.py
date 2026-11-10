@@ -23,6 +23,7 @@ LANGUAGE = re.compile(r"[a-z]{2,3}(_[A-Z]{2})?")
 
 
 def _length(value: str, maximum: int, label: str) -> None:
+    """Raises InvalidMessage unless `value` has 1 to `maximum` characters."""
     if not 1 <= len(value) <= maximum:
         raise InvalidMessage(f"{label} must be 1 to {maximum} characters long.")
 
@@ -43,6 +44,7 @@ class Recipient:
 
     @property
     def address(self) -> str:
+        """The phone number if known, otherwise the BSUID."""
         if self.phone is not None:
             return self.phone.value
         assert self.user_id is not None
@@ -51,6 +53,8 @@ class Recipient:
 
 @dataclass(frozen=True, slots=True)
 class TextMessage:
+    """Free-form text, only allowed within the 24-hour customer service window."""
+
     body: str = field(repr=False)
 
     def __post_init__(self) -> None:
@@ -59,6 +63,8 @@ class TextMessage:
 
 @dataclass(frozen=True, slots=True)
 class ReplyButton:
+    """A reply button. Its `id` comes back in the webhook when the user taps it."""
+
     id: str
     title: str
 
@@ -69,6 +75,8 @@ class ReplyButton:
 
 @dataclass(frozen=True, slots=True)
 class ButtonsMessage:
+    """Text with 1 to 3 reply buttons, only allowed within the 24-hour window."""
+
     body: str = field(repr=False)
     buttons: tuple[ReplyButton, ...]
     footer: str | None = None

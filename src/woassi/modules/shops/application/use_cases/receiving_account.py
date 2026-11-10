@@ -1,3 +1,5 @@
+"""The mobile money account that receives a shop's payments. Every change is audited."""
+
 from uuid import UUID
 
 from woassi.modules.shops.application.dto import ReceivingAccountView, receiving_account_view
@@ -17,6 +19,8 @@ def _masked(number: PhoneNumber) -> str:
 
 
 class GetReceivingAccount:
+    """Returns the shop's receiving account, if any."""
+
     def __init__(self, uow: ShopsUnitOfWork, cipher: SecretCipher) -> None:
         self._uow = uow
         self._cipher = cipher
@@ -29,6 +33,8 @@ class GetReceivingAccount:
 
 
 class SetReceivingAccount:
+    """Creates or replaces the shop's receiving account."""
+
     def __init__(self, uow: ShopsUnitOfWork, phones: PhoneNormalizer, cipher: SecretCipher) -> None:
         self._uow = uow
         self._phones = phones
@@ -45,6 +51,7 @@ class SetReceivingAccount:
         aggregator_merchant_id: str | None = None,
         ip: str | None = None,
     ) -> ReceivingAccountView:
+        """Raises InvalidData for an invalid number, InvalidReceivingAccount for a blank holder."""
         normalized = self._phones.normalize(number)
         if not holder_name.strip():
             raise InvalidReceivingAccount("The holder name is required.")
@@ -82,6 +89,8 @@ class SetReceivingAccount:
 
 
 class DeleteReceivingAccount:
+    """Removes the shop's receiving account. Does nothing if there is none."""
+
     def __init__(self, uow: ShopsUnitOfWork) -> None:
         self._uow = uow
 

@@ -1,3 +1,5 @@
+"""Turns domain errors into JSON responses: `{"code": ..., "message": ...}`."""
+
 from fastapi import FastAPI, Request, status
 from fastapi.responses import JSONResponse
 
@@ -25,6 +27,10 @@ HTTP_STATUSES: tuple[tuple[type[DomainError], int], ...] = (
 
 
 def http_status_for(error: DomainError) -> int:
+    """HTTP status of `error`, from the first matching family in `HTTP_STATUSES`.
+
+    Defaults to 400 for a business error outside every family.
+    """
     for error_type, http_status in HTTP_STATUSES:
         if isinstance(error, error_type):
             return http_status
@@ -32,12 +38,14 @@ def http_status_for(error: DomainError) -> int:
 
 
 def error_response(error: DomainError, http_status: int) -> JSONResponse:
+    """JSON body of an error: its stable `code` and its developer message."""
     return JSONResponse(
         status_code=http_status, content={"code": error.code, "message": error.message}
     )
 
 
 async def _handle_domain_error(_: Request, error: Exception) -> JSONResponse:
+    """Exception handler for every `DomainError`, with the headers some statuses need."""
     assert isinstance(error, DomainError)
     response = error_response(error, http_status_for(error))
     if isinstance(error, Unauthorized):
@@ -48,5 +56,6 @@ async def _handle_domain_error(_: Request, error: Exception) -> JSONResponse:
 
 
 def register_error_handlers(app: FastAPI) -> None:
+    """Installs the error handlers on `app`."""
     app.add_exception_handler(DomainError, _handle_domain_error)
     app.add_exception_handler(IdempotentReplay, replay_response)

@@ -1,3 +1,5 @@
+"""Steps shared by the shops use cases."""
+
 from uuid import UUID
 
 import structlog
@@ -11,6 +13,7 @@ log = structlog.get_logger()
 
 
 async def load_shop(uow: ShopsUnitOfWork, shop_id: UUID) -> Shop:
+    """The shop; raises ShopNotFound if it does not exist or is archived."""
     shop = await uow.shops.get(shop_id)
     if shop is None:
         raise ShopNotFound(f"Shop {shop_id} not found.")

@@ -1,3 +1,5 @@
+"""Ports of the shops module: its repository, Meta onboarding, and logo processing."""
+
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum, auto
@@ -15,17 +17,29 @@ class ShopRepository(Protocol):
         """Raise SlugTaken if the slug is taken."""
         ...
 
-    async def get(self, shop_id: UUID) -> Shop | None: ...
+    async def get(self, shop_id: UUID) -> Shop | None:
+        """The shop, unless archived."""
+        ...
 
-    async def get_by_phone_number_id(self, phone_number_id: str) -> Shop | None: ...
+    async def get_by_phone_number_id(self, phone_number_id: str) -> Shop | None:
+        """The shop holding this WhatsApp number, unless archived."""
+        ...
 
-    async def list(self, account_id: UUID, offset: int, limit: int) -> Sequence[Shop]: ...
+    async def list(self, account_id: UUID, offset: int, limit: int) -> Sequence[Shop]:
+        """A page of the account's shops, oldest first."""
+        ...
 
-    async def count(self, account_id: UUID) -> int: ...
+    async def count(self, account_id: UUID) -> int:
+        """Number of shops of the account."""
+        ...
 
-    async def list_connected(self) -> Sequence[Shop]: ...
+    async def list_connected(self) -> Sequence[Shop]:
+        """Every shop with a CONNECTED number."""
+        ...
 
-    async def list_by_waba_id(self, waba_id: str) -> Sequence[Shop]: ...
+    async def list_by_waba_id(self, waba_id: str) -> Sequence[Shop]:
+        """Every shop using this WhatsApp Business Account."""
+        ...
 
     async def save(self, shop: Shop) -> None:
         """Raise PhoneNumberAlreadyConnected if another shop holds the number."""
@@ -33,11 +47,15 @@ class ShopRepository(Protocol):
 
 
 class ShopsUnitOfWork(UnitOfWork, Protocol):
+    """Unit of Work of the shops module."""
+
     @property
     def shops(self) -> ShopRepository: ...
 
 
 class MetaFailure(Enum):
+    """Why a Meta call failed. UNAVAILABLE is Meta's fault, not the shop's."""
+
     INVALID_CODE = auto()
     INVALID_TOKEN = auto()
     REJECTED = auto()
@@ -55,6 +73,8 @@ class MetaError(Exception):
 
 @dataclass(frozen=True, slots=True)
 class MetaPhoneNumber:
+    """A WhatsApp number as Meta describes it."""
+
     display_phone_number: str
     verified_name: str
     on_business_app: bool
@@ -64,11 +84,17 @@ class MetaPhoneNumber:
 class MetaOnboardingPort(Protocol):
     """Every method raises MetaError on failure."""
 
-    async def exchange_code(self, code: str) -> str: ...
+    async def exchange_code(self, code: str) -> str:
+        """Exchanges the Embedded Signup code for the merchant's access token."""
+        ...
 
-    async def subscribe_app(self, waba_id: str, token: str) -> None: ...
+    async def subscribe_app(self, waba_id: str, token: str) -> None:
+        """Subscribes Woassi's app to the account's webhooks."""
+        ...
 
-    async def get_phone_number(self, phone_number_id: str, token: str) -> MetaPhoneNumber: ...
+    async def get_phone_number(self, phone_number_id: str, token: str) -> MetaPhoneNumber:
+        """Reads the number, which also proves the token gives access to it."""
+        ...
 
     async def link_catalog(
         self, waba_id: str, phone_number_id: str, token: str, catalog_id: str | None
@@ -76,14 +102,22 @@ class MetaOnboardingPort(Protocol):
         """Return the catalog of the account, linking `catalog_id` if it has none."""
         ...
 
-    async def sync_business_app_data(self, phone_number_id: str, token: str) -> None: ...
+    async def sync_business_app_data(self, phone_number_id: str, token: str) -> None:
+        """Asks Meta to sync contacts and history from the WhatsApp Business app."""
+        ...
 
-    async def unsubscribe_app(self, waba_id: str, token: str) -> None: ...
+    async def unsubscribe_app(self, waba_id: str, token: str) -> None:
+        """Stops the account's webhooks to Woassi."""
+        ...
 
-    async def token_is_valid(self, token: str) -> bool: ...
+    async def token_is_valid(self, token: str) -> bool:
+        """False if Meta says the token is no longer valid."""
+        ...
 
 
 class LogoProcessor(Protocol):
+    """Converts an uploaded logo to WebP."""
+
     async def to_webp(self, data: bytes) -> bytes:
         """Raise InvalidLogo if `data` is not a usable image."""
         ...

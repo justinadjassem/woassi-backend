@@ -1,3 +1,5 @@
+"""FastAPI dependencies shared by every module: authentication and shop access."""
+
 from typing import Annotated, cast
 from uuid import UUID
 
@@ -12,6 +14,7 @@ _bearer = HTTPBearer(auto_error=False)
 
 
 def get_shared(request: Request) -> SharedUseCases:
+    """The shared use cases, provided by the `Container` stored on the app."""
     return cast(SharedUseCases, request.app.state.container)
 
 
@@ -22,12 +25,17 @@ async def get_current_account(
     shared: SharedDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(_bearer)],
 ) -> AuthenticatedAccount:
+    """Authenticates the `Authorization: Bearer` access token.
+
+    Raises Unauthorized if the header is missing or the token is not valid.
+    """
     if credentials is None:
         raise Unauthorized("Authentication required.")
     return await shared.account_authenticator().authenticate(credentials.credentials)
 
 
 def client_ip(request: Request) -> str:
+    """IP of the direct client, for rate limits and the audit log."""
     return request.client.host if request.client else "unknown"
 
 

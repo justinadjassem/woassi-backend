@@ -1,9 +1,12 @@
+"""Domain events and the `Entity` base class that records them."""
+
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
 
 def _utc_now() -> datetime:
+    """Default timestamp of an event; the domain has no `Clock` to inject."""
     return datetime.now(UTC)
 
 
@@ -22,8 +25,10 @@ class Entity:
     _events: list[DomainEvent] = field(default_factory=list, init=False, repr=False, compare=False)
 
     def record_event(self, event: DomainEvent) -> None:
+        """Queues `event`, published once the transaction that saves this entity commits."""
         self._events.append(event)
 
     def pull_events(self) -> list[DomainEvent]:
+        """Returns the queued events and clears the queue, so each is published once."""
         events, self._events = self._events, []
         return events

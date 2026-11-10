@@ -1,3 +1,5 @@
+"""SQLAlchemy models of the customers module."""
+
 from datetime import datetime
 from uuid import UUID
 
@@ -8,6 +10,8 @@ from woassi.shared.infrastructure.db.base import Base
 
 
 class CustomerModel(Base):
+    """Row of `customers`. A BSUID is unique per shop; the phone is indexed for lookups."""
+
     __tablename__ = "customers"
     __table_args__ = (
         UniqueConstraint("shop_id", "user_id"),

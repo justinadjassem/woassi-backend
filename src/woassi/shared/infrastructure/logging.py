@@ -1,3 +1,5 @@
+"""Logging and error reporting setup."""
+
 import logging
 
 import sentry_sdk
@@ -30,6 +32,7 @@ def configure_logging(app_env: str) -> None:
 
 
 def configure_sentry(dsn: str | None, app_env: str) -> None:
+    """Enables Sentry when a DSN is configured; does nothing otherwise."""
     if dsn:
         # Graph API secrets travel in query strings: keep those URLs out of Sentry breadcrumbs.
         sentry_sdk.init(dsn=dsn, environment=app_env, disabled_integrations=[HttpxIntegration()])

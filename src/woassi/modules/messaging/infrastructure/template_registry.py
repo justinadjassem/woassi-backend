@@ -21,6 +21,7 @@ ALREADY_EXISTS_SUBCODE = 2388024
 
 
 def _create_body(definition: TemplateDefinition) -> dict[str, Any]:
+    """Graph API body creating a UTILITY template with named parameters."""
     components: list[dict[str, Any]] = [
         {
             "type": "BODY",
@@ -52,12 +53,18 @@ def _create_body(definition: TemplateDefinition) -> dict[str, Any]:
 
 
 class GraphTemplateRegistry:
+    """`TemplateRegistry` on the Graph API."""
+
     def __init__(self, graph: GraphClient) -> None:
         self._graph = graph
 
     async def submit(
         self, connection: ShopConnection, definition: TemplateDefinition
     ) -> SubmittedTemplate:
+        """Submits the template; if Meta already has it, returns its current status instead.
+
+        Raises SendError if Meta cannot be reached or refuses it.
+        """
         try:
             response = await self._graph.request(
                 "POST",
@@ -84,6 +91,7 @@ class GraphTemplateRegistry:
     async def status(
         self, connection: ShopConnection, name: str, language: str
     ) -> SubmittedTemplate | None:
+        """Looks the template up by name and language. Raises SendError on failure."""
         try:
             response = await self._graph.request(
                 "GET",

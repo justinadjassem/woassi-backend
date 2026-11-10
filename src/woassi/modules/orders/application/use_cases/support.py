@@ -1,3 +1,5 @@
+"""Helpers of the order flow: policies, message contents, and sending."""
+
 from uuid import UUID
 
 import structlog
@@ -30,15 +32,18 @@ ACCEPT, REFUSE, OFFER_YES, OFFER_NO = "accept", "refuse", "offer_yes", "offer_no
 
 
 def payload(action: str, order_id: UUID) -> str:
+    """Button payload for `action` on `order_id`."""
     return f"order:{action}:{order_id}"
 
 
 def policy(profile: ShopProfile) -> ValidationPolicy:
+    """The shop's validation policy. A 0 or missing limit means no limit."""
     limit = profile.auto_validation_max_amount
     return ValidationPolicy(profile.validation_mode, Amount(limit) if limit else None)
 
 
 def deadlines(profile: ShopProfile) -> Deadlines:
+    """The shop's reminder and expiry delays."""
     return Deadlines(
         reminder_1_minutes=profile.reminder_1_minutes,
         reminder_2_minutes=profile.reminder_2_minutes,
@@ -81,6 +86,7 @@ def customer_update(order: Order, language: str) -> Notification | None:
 
 
 def merchant_request(order: Order, profile: ShopProfile, customer_name: str | None) -> Template:
+    """The validation template for the merchant, with Accept / Refuse buttons."""
     return Template(
         name=VALIDATION_TEMPLATE,
         language=profile.language,
@@ -118,5 +124,6 @@ async def notify(
 
 
 async def release(catalog: CatalogPort, order: Order) -> None:
+    """Gives back the stock the order holds, if any."""
     if order.reserved:
         await catalog.release(order.shop_id, order.reserved)

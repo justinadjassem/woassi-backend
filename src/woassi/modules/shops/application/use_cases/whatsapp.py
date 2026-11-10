@@ -1,3 +1,8 @@
+"""WhatsApp number connection (Embedded Signup), disconnection, and health checks.
+
+Graph calls run outside any transaction; the shop is reloaded before each write.
+"""
+
 from uuid import UUID
 
 import structlog
@@ -38,12 +43,15 @@ _TOKEN_EXPIRED = "Access to this WhatsApp account has expired. Please connect it
 
 
 def _to_domain_error(error: MetaError) -> DomainError:
+    """Turns a `MetaError` into the domain error the merchant sees."""
     if error.failure is MetaFailure.INVALID_CODE:
         return InvalidSignupCode(_INVALID_CODE)
     return WhatsAppConnectionFailed(_MESSAGES[error.failure])
 
 
 class ConnectWhatsApp:
+    """Connects a shop's WhatsApp number from the Embedded Signup result."""
+
     def __init__(
         self,
         uow: ShopsUnitOfWork,
@@ -65,6 +73,18 @@ class ConnectWhatsApp:
         phone_number_id: str,
         catalog_id: str | None = None,
     ) -> WhatsAppView:
+        """Exchanges the code, subscribes to webhooks, checks the number, links the catalog,
+        then stores the encrypted token. The shop goes ACTIVE.
+
+        Every failure is recorded on the shop (status ERROR) before raising.
+
+        Raises:
+            PhoneNumberAlreadyConnected: another shop holds this number.
+            WhatsAppAlreadyConnected: this shop already has a connected number.
+            InvalidSignupCode: the code expired or was already used.
+            PhoneNumberNotUsable: the number is not on the Cloud API.
+            WhatsAppConnectionFailed: Meta refused or did not answer.
+        """
         async with self._uow as uow:
             shop = await load_shop(uow, shop_id)
             holder = await uow.shops.get_by_phone_number_id(phone_number_id)
@@ -126,6 +146,7 @@ class ConnectWhatsApp:
         catalog_id: str | None,
         token: str,
     ) -> WhatsAppView:
+        """Stores the connection; the unique number constraint settles a race with another shop."""
         try:
             async with self._uow as uow:
                 shop = await load_shop(uow, shop_id)
@@ -148,6 +169,7 @@ class ConnectWhatsApp:
         return whatsapp_view(shop.whatsapp)
 
     async def _record_failure(self, shop_id: UUID, message: str) -> None:
+        """Marks the connection as failed, with a message for the merchant."""
         async with self._uow as uow:
             shop = await load_shop(uow, shop_id)
             shop.fail_whatsapp(message)
@@ -156,10 +178,13 @@ class ConnectWhatsApp:
 
 
 class GetWhatsApp:
+    """Returns a shop's WhatsApp connection."""
+
     def __init__(self, uow: ShopsUnitOfWork) -> None:
         self._uow = uow
 
     async def execute(self, shop_id: UUID) -> WhatsAppView:
+        """Raises WhatsAppNotFound if the shop never started a connection."""
         async with self._uow as uow:
             shop = await load_shop(uow, shop_id)
         if shop.whatsapp is None:
@@ -168,6 +193,8 @@ class GetWhatsApp:
 
 
 class DisconnectWhatsApp:
+    """Disconnects a shop's number at the merchant's request."""
+
     def __init__(
         self, uow: ShopsUnitOfWork, meta: MetaOnboardingPort, cipher: SecretCipher
     ) -> None:
@@ -176,6 +203,7 @@ class DisconnectWhatsApp:
         self._cipher = cipher
 
     async def execute(self, shop_id: UUID) -> None:
+        """Unsubscribes from Meta (best effort), then frees the number."""
         async with self._uow as uow:
             shop = await load_shop(uow, shop_id)
         await unsubscribe_quietly(shop, self._meta, self._cipher)

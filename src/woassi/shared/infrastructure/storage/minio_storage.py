@@ -1,3 +1,5 @@
+"""MinIO implementation of `StoragePort`."""
+
 from collections.abc import Callable
 from datetime import timedelta
 from functools import partial
@@ -46,11 +48,13 @@ class MinioStorage:
         )
 
     async def presigned_get(self, key: str, expire_s: int = 3600) -> str:
+        """Signed download URL, valid for `expire_s` seconds."""
         return self._signer.presigned_get_object(
             self._bucket, key, expires=timedelta(seconds=expire_s)
         )
 
     async def put(self, key: str, data: bytes, content_type: str) -> None:
+        """Uploads `data` under `key`."""
         await self._in_thread(
             partial(
                 self._client.put_object,
@@ -63,9 +67,11 @@ class MinioStorage:
         )
 
     async def get(self, key: str) -> bytes:
+        """Downloads `key`. Raises ObjectNotFound if it does not exist."""
         return await self._in_thread(partial(self._read, key))
 
     async def stat(self, key: str) -> ObjectInfo | None:
+        """Size and content type of `key`, or None if it does not exist."""
         try:
             obj = await self._in_thread(partial(self._client.stat_object, self._bucket, key))
         except S3Error as error:
@@ -75,14 +81,17 @@ class MinioStorage:
         return ObjectInfo(key=key, size=obj.size or 0, content_type=obj.content_type)
 
     async def delete(self, key: str) -> None:
+        """Deletes `key`."""
         await self._in_thread(partial(self._client.remove_object, self._bucket, key))
 
     def public_url(self, key: str) -> str:
+        """Stable, unsigned URL of `key`. Raises BucketNotPublic on a private bucket."""
         if self._public_base_url is None:
             raise BucketNotPublic(f"Bucket {self._bucket} is not public.")
         return f"{self._public_base_url}/{key}"
 
     def _read(self, key: str) -> bytes:
+        """Downloads `key` (blocking), always giving the connection back to the pool."""
         try:
             response = self._client.get_object(self._bucket, key)
         except S3Error as error:
@@ -97,4 +106,5 @@ class MinioStorage:
 
     @staticmethod
     async def _in_thread[T](call: Callable[[], T]) -> T:
+        """Runs a blocking SDK call in a worker thread."""
         return await anyio.to_thread.run_sync(call)

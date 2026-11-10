@@ -1,3 +1,5 @@
+"""Handling of webhook events, in the worker."""
+
 import structlog
 
 from woassi.modules.messaging.application.ports import (
@@ -47,6 +49,7 @@ class HandleMetaEvent:
         self._clock = clock
 
     async def execute(self, event: MetaEvent) -> None:
+        """Dispatches `event` by type."""
         match event:
             case InboundMessage():
                 await self._message(event)
@@ -66,6 +69,10 @@ class HandleMetaEvent:
                 )
 
     async def _message(self, message: InboundMessage) -> None:
+        """Hands an inbound message to the handler, once.
+
+        A message for a number no shop owns is dropped (its key stays claimed).
+        """
         async with self._uow as uow:
             # The key stays reserved until the commit: a concurrent duplicate waits, then skips.
             if not await uow.inbox.claim(MESSAGE_SOURCE, message.message_id):
@@ -85,6 +92,7 @@ class HandleMetaEvent:
             await uow.commit()
 
     async def _status(self, update: MessageStatusUpdate) -> None:
+        """Moves an outbound message's status forward; unknown statuses are ignored."""
         status = status_from_meta(update.status)
         if status is None:
             return
@@ -99,6 +107,7 @@ class HandleMetaEvent:
                 await uow.commit()
 
     async def _account(self, update: AccountUpdate) -> None:
+        """Disconnects the account's shops if Woassi lost access to it; logs other events."""
         if update.event not in ACCESS_LOST:
             log.info("meta_account_update", waba_id=update.waba_id, account_event=update.event)
             return

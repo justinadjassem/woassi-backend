@@ -1,3 +1,5 @@
+"""Messaging module seen from `orders`: sending WhatsApp notifications."""
+
 from uuid import UUID
 
 import structlog
@@ -42,6 +44,7 @@ def template_definitions() -> list[TemplateDefinition]:
 
 
 def _content(notification: Notification) -> MessageContent:
+    """Converts an orders notification into a messaging content."""
     match notification:
         case Text():
             return TextMessage(notification.body)
@@ -60,6 +63,7 @@ def _content(notification: Notification) -> MessageContent:
 
 
 def _recipient(contact: Contact) -> Recipient:
+    """Converts an orders contact into a messaging recipient."""
     phone = contact.phone
     if phone and not phone.startswith("+"):
         # Meta writes `from` without the plus sign.
@@ -76,6 +80,11 @@ class WhatsAppNotifications:
     async def send(
         self, shop_id: UUID, to: Contact, notification: Notification, *, kind: str
     ) -> str:
+        """Sends `notification` and returns the WhatsApp message id.
+
+        `kind` labels the message in `outbound_messages`. Any refusal (no connected number, outside
+        the 24-hour window, template not approved...) becomes NotificationNotSent.
+        """
         try:
             return await self._use_case.execute(
                 shop_id=shop_id, recipient=_recipient(to), content=_content(notification), kind=kind

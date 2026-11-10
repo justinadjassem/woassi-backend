@@ -1,3 +1,5 @@
+"""Customers: the WhatsApp users who write to a shop."""
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID, uuid4
@@ -37,6 +39,7 @@ class Customer(Entity):
         name: str | None,
         now: datetime,
     ) -> "Customer":
+        """A new customer, first seen at `now`."""
         return cls(
             id=uuid4(),
             shop_id=shop_id,

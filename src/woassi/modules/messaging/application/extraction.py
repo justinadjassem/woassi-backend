@@ -20,16 +20,19 @@ from woassi.modules.messaging.domain.event import (
 
 
 def _mappings(value: object) -> list[Mapping[str, Any]]:
+    """The dict items of `value` if it is a list; an empty list for anything else."""
     if not isinstance(value, Sequence) or isinstance(value, str | bytes):
         return []
     return [element for element in value if isinstance(element, Mapping)]
 
 
 def _text(value: object) -> str | None:
+    """`value` if it is a non-empty string, else None."""
     return value if isinstance(value, str) and value else None
 
 
 def _integer(value: object) -> int | None:
+    """`value` as an int (Meta sends timestamps as strings), or None."""
     try:
         return int(value)  # type: ignore[call-overload, no-any-return]
     except (TypeError, ValueError):
@@ -37,6 +40,7 @@ def _integer(value: object) -> int | None:
 
 
 def _profile_name(contacts: list[Mapping[str, Any]], message: Mapping[str, Any]) -> str | None:
+    """WhatsApp profile name of the message's sender, found in `contacts`."""
     for contact in contacts:
         same_user = contact.get("user_id") and contact.get("user_id") == message.get("from_user_id")
         same_phone = contact.get("wa_id") and contact.get("wa_id") == message.get("from")
@@ -49,6 +53,7 @@ def _profile_name(contacts: list[Mapping[str, Any]], message: Mapping[str, Any])
 def _message(
     phone_number_id: str, message: Mapping[str, Any], contacts: list[Mapping[str, Any]]
 ) -> InboundMessage | None:
+    """An `InboundMessage`, or None if the id, type or sender is missing."""
     message_id = _text(message.get("id"))
     message_type = _text(message.get("type"))
     sender_user_id = _text(message.get("from_user_id"))
@@ -71,6 +76,7 @@ def _message(
 
 
 def _status(phone_number_id: str, status: Mapping[str, Any]) -> MessageStatusUpdate | None:
+    """A `MessageStatusUpdate`, or None if the id or status is missing."""
     message_id = _text(status.get("id"))
     value = _text(status.get("status"))
     if not (message_id and value):
@@ -85,6 +91,7 @@ def _status(phone_number_id: str, status: Mapping[str, Any]) -> MessageStatusUpd
 
 
 def _messages_change(value: Mapping[str, Any]) -> list[MetaEvent]:
+    """Events of a `messages` change: inbound messages and delivery statuses."""
     metadata = value.get("metadata")
     phone_number_id = (
         _text(metadata.get("phone_number_id")) if isinstance(metadata, Mapping) else None
@@ -103,6 +110,7 @@ def _messages_change(value: Mapping[str, Any]) -> list[MetaEvent]:
 
 
 def _account_change(entry: Mapping[str, Any], value: Mapping[str, Any]) -> list[MetaEvent]:
+    """Event of an `account_update` change, or nothing if incomplete."""
     event = _text(value.get("event"))
     # PARTNER_REMOVED names the account in waba_info, the others only in entry.id.
     waba_info = value.get("waba_info")
@@ -114,6 +122,7 @@ def _account_change(entry: Mapping[str, Any], value: Mapping[str, Any]) -> list[
 
 
 def _template_change(entry: Mapping[str, Any], value: Mapping[str, Any]) -> list[MetaEvent]:
+    """Event of a `message_template_status_update` change, or nothing if incomplete."""
     waba_id = _text(entry.get("id"))
     name = _text(value.get("message_template_name"))
     language = _text(value.get("message_template_language"))

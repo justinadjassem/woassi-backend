@@ -1,3 +1,5 @@
+"""SQLAlchemy models of the accounts module."""
+
 from datetime import datetime
 from uuid import UUID
 
@@ -8,6 +10,8 @@ from woassi.shared.infrastructure.db.base import Base
 
 
 class AccountModel(Base):
+    """Row of `accounts`. The phone number is unique and stored in E.164."""
+
     __tablename__ = "accounts"
     __table_args__ = (CheckConstraint("status IN ('ACTIVE', 'SUSPENDED')", name="status_valid"),)
 
@@ -23,6 +27,8 @@ class AccountModel(Base):
 
 
 class RefreshTokenModel(Base):
+    """Row of `refresh_tokens`. Only the SHA-256 of the token is stored."""
+
     __tablename__ = "refresh_tokens"
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
@@ -37,6 +43,8 @@ class RefreshTokenModel(Base):
 
 
 class VerificationCodeModel(Base):
+    """Row of `verification_codes`. The code is stored hashed with the password hasher."""
+
     __tablename__ = "verification_codes"
     __table_args__ = (
         CheckConstraint(

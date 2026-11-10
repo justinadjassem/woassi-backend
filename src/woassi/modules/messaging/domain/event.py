@@ -1,3 +1,8 @@
+"""Events read from Meta webhooks, processed one by one in the worker.
+
+They are pickled into arq jobs, and arq logs their repr.
+"""
+
 from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import Any

@@ -178,6 +178,7 @@ from woassi.shared.infrastructure.storage.minio_storage import MinioStorage
 
 
 def _minio_client(endpoint: str, settings: Settings) -> Minio:
+    """MinIO client for `endpoint`: the internal one to transfer, the public one to sign."""
     return Minio(
         endpoint,
         access_key=settings.minio_access_key,
@@ -189,6 +190,7 @@ def _minio_client(endpoint: str, settings: Settings) -> Minio:
 
 def _code_sender(settings: Settings) -> VerificationCodeSender:
     # The log sender writes codes in clear text: it must never run outside development.
+    """Verification code sender for the environment. Refuses to start outside dev for now."""
     if settings.app_env == "dev":
         return LogVerificationCodeSender()
     raise RuntimeError(f"No verification code sender for environment {settings.app_env}.")
@@ -204,6 +206,12 @@ class Container(
     SharedUseCases,
     ShopsUseCases,
 ):
+    """Builds every adapter and use case, and implements each module's `<Module>UseCases`.
+
+    One instance per process (API or worker). Use cases and Units of Work are created per
+    call.
+    """
+
     settings: Settings
     engine: AsyncEngine
     sessions: async_sessionmaker[AsyncSession]
@@ -221,6 +229,9 @@ class Container(
 
     @classmethod
     async def build(cls, settings: Settings) -> "Container":
+        """Opens the connections (Postgres, Redis, MinIO, HTTP) and registers the event
+        subscribers.
+        """
         engine = create_engine(settings.database_url)
         client = _minio_client(settings.minio_endpoint, settings)
         signer = _minio_client(settings.minio_public_endpoint, settings)
@@ -264,6 +275,7 @@ class Container(
         )
 
     async def close(self) -> None:
+        """Closes the HTTP client, the Redis pool and the database engine."""
         await self.http.aclose()
         await self.arq.aclose()
         await self.engine.dispose()
@@ -343,6 +355,7 @@ class Container(
         return GraphTemplateRegistry(self.graph())
 
     def _order_flow[F: OrderFlow](self, use_case: type[F]) -> F:
+        """Builds an order flow use case with all its ports."""
         return use_case(
             self.orders_uow(),
             self.order_shops(),
@@ -496,6 +509,7 @@ class Container(
 
     # Use cases: shops
     def create_shop(self) -> CreateShop:
+        """Passes the Unit of Work factory itself: each slug attempt needs a new transaction."""
         return CreateShop(self.shops_uow, self.product_images, self.clock)
 
     def list_shops(self) -> ListShops:

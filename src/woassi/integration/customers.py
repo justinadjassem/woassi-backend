@@ -1,3 +1,5 @@
+"""Customers module seen from `orders`: how to reach a customer."""
+
 from uuid import UUID
 
 from woassi.modules.customers.application.use_cases.customers import GetCustomer
@@ -12,6 +14,7 @@ class CustomerContacts:
         self._use_case = use_case
 
     async def contact(self, shop_id: UUID, customer_id: UUID) -> Contact:
+        """WhatsApp contact of a customer; an empty contact if it no longer exists."""
         try:
             customer = await self._use_case.execute(shop_id=shop_id, customer_id=customer_id)
         except CustomerNotFound:

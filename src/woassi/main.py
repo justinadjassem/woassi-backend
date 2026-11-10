@@ -1,3 +1,5 @@
+"""FastAPI application: middlewares, error handlers and routers."""
+
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
@@ -22,6 +24,7 @@ from woassi.shared.infrastructure.logging import configure_logging, configure_se
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """Builds the `Container` at startup and releases its connections at shutdown."""
     container = await Container.build(app.state.settings)
     app.state.container = container
     try:
@@ -31,6 +34,7 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
+    """Builds the API. `settings` defaults to the environment; tests pass their own."""
     settings = settings or get_settings()
     configure_logging(settings.app_env)
     configure_sentry(settings.sentry_dsn, settings.app_env)

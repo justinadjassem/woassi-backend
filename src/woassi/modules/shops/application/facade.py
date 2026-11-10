@@ -1,3 +1,5 @@
+"""Use cases the shops api needs, provided by the composition root."""
+
 from typing import Protocol
 
 from woassi.modules.shops.application.use_cases.logo import ConfirmLogo, RequestLogoUpload

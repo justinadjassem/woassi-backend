@@ -1,3 +1,5 @@
+"""SQLAlchemy models of the orders module."""
+
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -14,6 +16,8 @@ _STATUSES = (
 
 
 class OrderModel(Base):
+    """Row of `orders`. Lines and deadlines are stored as JSON, as they were at order time."""
+
     __tablename__ = "orders"
     __table_args__ = (
         UniqueConstraint("shop_id", "number"),

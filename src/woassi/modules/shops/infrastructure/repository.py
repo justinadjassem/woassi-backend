@@ -1,3 +1,5 @@
+"""SQLAlchemy implementation of the shop repository."""
+
 from collections.abc import Callable, Sequence
 from uuid import UUID
 
@@ -30,6 +32,7 @@ from woassi.shared.domain.values import PhoneNumber
 
 
 def _settings_to_domain(model: ShopSettingsModel) -> ShopSettings:
+    """Converts a settings row to domain `ShopSettings`."""
     number = model.notification_number
     return ShopSettings(
         notification_number=PhoneNumber(number) if number else None,
@@ -47,6 +50,7 @@ def _settings_to_domain(model: ShopSettingsModel) -> ShopSettings:
 
 
 def _whatsapp_to_domain(model: WhatsAppAccountModel) -> WhatsAppAccount:
+    """Converts a WhatsApp row to a domain `WhatsAppAccount`."""
     return WhatsAppAccount(
         waba_id=model.waba_id,
         status=WhatsAppStatus(model.status),
@@ -61,6 +65,7 @@ def _whatsapp_to_domain(model: WhatsAppAccountModel) -> WhatsAppAccount:
 
 
 def _receiving_to_domain(model: ReceivingAccountModel) -> ReceivingAccount:
+    """Converts a receiving account row to a domain `ReceivingAccount`."""
     return ReceivingAccount(
         operator=Operator(model.operator),
         number=PhoneNumber(model.number),
@@ -71,6 +76,7 @@ def _receiving_to_domain(model: ReceivingAccountModel) -> ReceivingAccount:
 
 
 def _to_domain(model: ShopModel) -> Shop:
+    """Converts a shop row, with its parts, to a domain `Shop`."""
     return Shop(
         id=model.id,
         account_id=model.account_id,
@@ -92,6 +98,7 @@ def _to_domain(model: ShopModel) -> Shop:
 
 
 def _copy_settings(settings: ShopSettings, model: ShopSettingsModel) -> ShopSettingsModel:
+    """Copies `settings` onto `model`, and returns `model`."""
     number = settings.notification_number
     details = settings.invoice_details
     model.notification_number = number.value if number else None
@@ -115,6 +122,7 @@ def _copy_settings(settings: ShopSettings, model: ShopSettingsModel) -> ShopSett
 
 
 def _copy_whatsapp(account: WhatsAppAccount, model: WhatsAppAccountModel) -> WhatsAppAccountModel:
+    """Copies `account` onto `model`, and returns `model`."""
     model.waba_id = account.waba_id
     model.status = account.status.value
     model.phone_number_id = account.phone_number_id
@@ -130,6 +138,7 @@ def _copy_whatsapp(account: WhatsAppAccount, model: WhatsAppAccountModel) -> Wha
 def _copy_receiving(
     account: ReceivingAccount, model: ReceivingAccountModel
 ) -> ReceivingAccountModel:
+    """Copies `account` onto `model`, and returns `model`."""
     model.operator = account.operator.value
     model.number = account.number.value
     model.holder_name = account.holder_name
@@ -139,6 +148,7 @@ def _copy_receiving(
 
 
 def _copy_shop(shop: Shop, model: ShopModel) -> ShopModel:
+    """Copies the shop's own fields (not its parts) onto `model`, and returns `model`."""
     model.id = shop.id
     model.account_id = shop.account_id
     model.name = shop.name
@@ -154,11 +164,14 @@ def _copy_shop(shop: Shop, model: ShopModel) -> ShopModel:
 
 
 class SqlAlchemyShopRepository:
+    """`ShopRepository` on SQLAlchemy. Archived shops are filtered out of every read."""
+
     def __init__(self, session: AsyncSession, track: Callable[[Entity], None]) -> None:
         self._session = session
         self._track = track
 
     async def add(self, shop: Shop) -> None:
+        """Inserts the shop with its settings; raises SlugTaken on the slug's unique constraint."""
         model = _copy_shop(shop, ShopModel())
         model.settings = _copy_settings(shop.settings, ShopSettingsModel())
         self._session.add(model)
@@ -225,6 +238,12 @@ class SqlAlchemyShopRepository:
         return [_to_domain(model) for model in models]
 
     async def save(self, shop: Shop) -> None:
+        """Updates the shop and its parts; a removed part deletes its row.
+
+        Raises PhoneNumberAlreadyConnected on the number's unique constraint, LookupError if
+        the shop
+        does not exist.
+        """
         model = await self._session.get(ShopModel, shop.id)
         if model is None:
             raise LookupError(f"Shop {shop.id} does not exist.")

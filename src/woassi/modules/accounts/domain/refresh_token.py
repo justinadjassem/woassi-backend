@@ -1,3 +1,5 @@
+"""Refresh tokens: long-lived, single-use, rotated on every refresh."""
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID

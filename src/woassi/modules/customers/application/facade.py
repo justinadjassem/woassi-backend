@@ -1,3 +1,5 @@
+"""Use cases the customers api needs, provided by the composition root."""
+
 from typing import Protocol
 
 from woassi.modules.customers.application.use_cases.customers import GetCustomer, ListCustomers

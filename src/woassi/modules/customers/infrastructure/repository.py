@@ -1,3 +1,5 @@
+"""SQLAlchemy implementation of the customer repository."""
+
 from collections.abc import Callable, Sequence
 from uuid import UUID
 
@@ -11,6 +13,7 @@ from woassi.shared.domain.values import PhoneNumber
 
 
 def _to_domain(model: CustomerModel) -> Customer:
+    """Converts a row to a domain `Customer`."""
     return Customer(
         id=model.id,
         shop_id=model.shop_id,
@@ -23,6 +26,7 @@ def _to_domain(model: CustomerModel) -> Customer:
 
 
 def _copy(customer: Customer, model: CustomerModel) -> CustomerModel:
+    """Copies every field of `customer` onto `model`, and returns `model`."""
     model.id = customer.id
     model.shop_id = customer.shop_id
     model.user_id = customer.user_id
@@ -34,6 +38,8 @@ def _copy(customer: Customer, model: CustomerModel) -> CustomerModel:
 
 
 class SqlAlchemyCustomerRepository:
+    """`CustomerRepository` on SQLAlchemy. Saved customers are tracked for their events."""
+
     def __init__(self, session: AsyncSession, track: Callable[[Entity], None]) -> None:
         self._session = session
         self._track = track
@@ -85,6 +91,7 @@ class SqlAlchemyCustomerRepository:
         return total or 0
 
     async def save(self, customer: Customer) -> None:
+        """Updates an existing customer; raises LookupError if it does not exist."""
         model = await self._session.get(CustomerModel, customer.id)
         if model is None:
             raise LookupError(f"Customer {customer.id} does not exist.")

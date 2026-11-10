@@ -1,3 +1,5 @@
+"""Data returned by the accounts use cases."""
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from uuid import UUID
@@ -7,6 +9,8 @@ from woassi.modules.accounts.domain.account import Account, AccountStatus
 
 @dataclass(frozen=True, slots=True)
 class AccountView:
+    """Read-only view of an account, without its password hash."""
+
     id: UUID
     full_name: str
     phone: str
@@ -18,6 +22,7 @@ class AccountView:
 
 
 def account_view(account: Account) -> AccountView:
+    """Builds the view of `account`."""
     return AccountView(
         id=account.id,
         full_name=account.full_name,
@@ -32,6 +37,11 @@ def account_view(account: Account) -> AccountView:
 
 @dataclass(frozen=True, slots=True)
 class TokenPair:
+    """Access token and refresh token of a session, with their lifetimes in seconds.
+
+    The tokens are hidden from `repr` so they never end up in logs.
+    """
+
     access_token: str = field(repr=False)
     expires_in: int
     refresh_token: str = field(repr=False)

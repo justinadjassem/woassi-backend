@@ -1,19 +1,29 @@
+"""Errors of the messaging module."""
+
 from woassi.shared.domain.errors import Conflict, DomainError, InvalidData, UpstreamError
 
 
 class InvalidSignature(DomainError):
+    """The webhook's `X-Hub-Signature-256` does not match its body."""
+
     code = "messaging.invalid_signature"
 
 
 class VerificationRefused(DomainError):
+    """Meta's subscription check has a wrong verify token or mode."""
+
     code = "messaging.verification_refused"
 
 
 class InvalidMessage(InvalidData):
+    """The message breaks one of Meta's limits (length, buttons, template name...)."""
+
     code = "messaging.invalid_message"
 
 
 class ShopNotConnected(Conflict):
+    """The shop has no usable WhatsApp number."""
+
     code = "messaging.shop_not_connected"
 
 
@@ -24,10 +34,14 @@ class OutsideCustomerServiceWindow(Conflict):
 
 
 class InvalidRecipient(InvalidData):
+    """The recipient cannot receive WhatsApp messages."""
+
     code = "messaging.invalid_recipient"
 
 
 class MessageNotSent(UpstreamError):
+    """Meta did not take the message; trying again later may work."""
+
     code = "messaging.message_not_sent"
 
 

@@ -1,3 +1,5 @@
+"""Image processing with Pillow."""
+
 from collections.abc import Sequence
 from functools import partial
 from io import BytesIO
@@ -13,6 +15,7 @@ WEBP_QUALITY = 85
 
 
 def _encode(image: Image.Image, size: int) -> bytes:
+    """One WebP variant fitting in `size` x `size`, aspect ratio kept."""
     variant = image.copy()
     variant.thumbnail((size, size), Image.Resampling.LANCZOS)  # never upscales
     output = BytesIO()
@@ -21,6 +24,11 @@ def _encode(image: Image.Image, size: int) -> bytes:
 
 
 def _generate(data: bytes, sizes: Sequence[int]) -> dict[int, bytes]:
+    """Decodes `data` and returns one WebP per size (blocking).
+
+    Applies the EXIF orientation, then drops every metadata. Raises UnreadableImage for an
+    unsupported format, a corrupt file, or an image over `MAX_PIXELS`.
+    """
     try:
         with Image.open(BytesIO(data), formats=ACCEPTED_FORMATS) as source:
             width, height = source.size
@@ -42,6 +50,9 @@ def _generate(data: bytes, sizes: Sequence[int]) -> dict[int, bytes]:
 
 
 class PillowImageProcessor:
+    """`ImageProcessor` on Pillow."""
+
     async def webp_variants(self, data: bytes, sizes: Sequence[int]) -> dict[int, bytes]:
         # CPU work: off the event loop so it does not block other jobs.
+        """WebP variants of `data` per width; raises UnreadableImage."""
         return await anyio.to_thread.run_sync(partial(_generate, data, sizes))

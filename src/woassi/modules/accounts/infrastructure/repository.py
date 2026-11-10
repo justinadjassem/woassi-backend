@@ -1,3 +1,5 @@
+"""SQLAlchemy implementations of the accounts repositories."""
+
 from collections.abc import Callable
 from datetime import datetime
 from uuid import UUID
@@ -20,6 +22,7 @@ from woassi.shared.domain.values import PhoneNumber
 
 
 def _account_to_domain(model: AccountModel) -> Account:
+    """Converts a row to a domain `Account`."""
     return Account(
         id=model.id,
         full_name=model.full_name,
@@ -34,6 +37,7 @@ def _account_to_domain(model: AccountModel) -> Account:
 
 
 def _copy_account(account: Account, model: AccountModel) -> AccountModel:
+    """Copies every field of `account` onto `model`, and returns `model`."""
     model.id = account.id
     model.full_name = account.full_name
     model.phone = account.phone.value
@@ -47,11 +51,14 @@ def _copy_account(account: Account, model: AccountModel) -> AccountModel:
 
 
 class SqlAlchemyAccountRepository:
+    """`AccountRepository` on SQLAlchemy. Saved accounts are tracked for their events."""
+
     def __init__(self, session: AsyncSession, track: Callable[[Entity], None]) -> None:
         self._session = session
         self._track = track
 
     async def add(self, account: Account) -> None:
+        """Inserts the account; raises PhoneAlreadyUsed on the phone's unique constraint."""
         self._session.add(_copy_account(account, AccountModel()))
         try:
             await self._session.flush()
@@ -72,6 +79,7 @@ class SqlAlchemyAccountRepository:
         return _account_to_domain(model) if model else None
 
     async def save(self, account: Account) -> None:
+        """Updates an existing account; raises LookupError if it does not exist."""
         model = await self._session.get(AccountModel, account.id)
         if model is None:
             raise LookupError(f"Account {account.id} does not exist.")
@@ -81,6 +89,8 @@ class SqlAlchemyAccountRepository:
 
 
 class SqlAlchemyRefreshTokenStore:
+    """`RefreshTokenStore` on SQLAlchemy."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -136,6 +146,7 @@ class SqlAlchemyRefreshTokenStore:
         await self._revoke(now, RefreshTokenModel.account_id == account_id)
 
     async def _revoke(self, now: datetime, condition: object) -> None:
+        """Revokes every token matching `condition` that is not revoked yet."""
         await self._session.execute(
             update(RefreshTokenModel)
             .where(condition, RefreshTokenModel.revoked_at.is_(None))  # type: ignore[arg-type]
@@ -144,6 +155,7 @@ class SqlAlchemyRefreshTokenStore:
 
 
 def _code_to_domain(model: VerificationCodeModel) -> VerificationCode:
+    """Converts a row to a domain `VerificationCode`."""
     return VerificationCode(
         id=model.id,
         account_id=model.account_id,
@@ -157,6 +169,8 @@ def _code_to_domain(model: VerificationCodeModel) -> VerificationCode:
 
 
 class SqlAlchemyVerificationCodeStore:
+    """`VerificationCodeStore` on SQLAlchemy."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -176,6 +190,7 @@ class SqlAlchemyVerificationCodeStore:
         await self._session.flush()
 
     async def get_latest(self, account_id: UUID, purpose: CodePurpose) -> VerificationCode | None:
+        """Latest code of this purpose, locked (`FOR UPDATE`) until the transaction ends."""
         model = await self._session.scalar(
             select(VerificationCodeModel)
             .where(

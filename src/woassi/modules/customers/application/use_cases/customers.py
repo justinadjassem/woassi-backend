@@ -1,3 +1,5 @@
+"""Customer records: kept up to date by inbound messages, read by the dashboard."""
+
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -11,6 +13,8 @@ from woassi.shared.domain.values import PhoneNumber
 
 @dataclass(frozen=True, slots=True)
 class CustomerView:
+    """Read-only view of a customer."""
+
     id: UUID
     user_id: str | None
     phone: str | None
@@ -20,6 +24,7 @@ class CustomerView:
 
 
 def customer_view(customer: Customer) -> CustomerView:
+    """Builds the view of `customer`."""
     return CustomerView(
         id=customer.id,
         user_id=customer.user_id,
@@ -45,6 +50,7 @@ class RecordContact:
         name: str | None,
         at: datetime,
     ) -> UUID:
+        """Creates or updates the customer, and returns its id."""
         async with self._uow as uow:
             customer = await uow.customers.find(shop_id, user_id=user_id, phone=phone)
             if customer is None:
@@ -66,6 +72,7 @@ class ChangeCustomerUserId:
         self._uow = uow
 
     async def execute(self, *, shop_id: UUID, previous_user_id: str, user_id: str) -> bool:
+        """Moves the customer to `user_id`. False if no customer had `previous_user_id`."""
         async with self._uow as uow:
             customer = await uow.customers.find(shop_id, user_id=previous_user_id, phone=None)
             if customer is None or customer.user_id != previous_user_id:
@@ -77,6 +84,8 @@ class ChangeCustomerUserId:
 
 
 class ListCustomers:
+    """Lists a shop's customers, one page at a time."""
+
     def __init__(self, uow: CustomersUnitOfWork) -> None:
         self._uow = uow
 
@@ -90,10 +99,13 @@ class ListCustomers:
 
 
 class GetCustomer:
+    """Returns one customer of a shop."""
+
     def __init__(self, uow: CustomersUnitOfWork) -> None:
         self._uow = uow
 
     async def execute(self, *, shop_id: UUID, customer_id: UUID) -> CustomerView:
+        """Raises CustomerNotFound if the shop has no such customer."""
         async with self._uow as uow:
             customer = await uow.customers.get(shop_id, customer_id)
         if customer is None:

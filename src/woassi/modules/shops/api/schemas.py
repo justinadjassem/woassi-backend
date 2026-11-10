@@ -1,3 +1,5 @@
+"""Request and response bodies of the shops api."""
+
 from datetime import datetime
 from uuid import UUID
 
@@ -25,6 +27,8 @@ META_ID = r"^\d{1,32}$"
 
 
 class ShopCreate(BaseModel):
+    """Body of `POST /shops`."""
+
     name: str = Field(min_length=1, max_length=200)
     category: str = Field(default="", max_length=100)
     city: str = Field(default="", max_length=100)
@@ -32,6 +36,8 @@ class ShopCreate(BaseModel):
 
 
 class ShopUpdate(BaseModel):
+    """Body of `PATCH /shops/{shop_id}`: only the fields sent are changed."""
+
     name: str | None = Field(default=None, min_length=1, max_length=200)
     category: str | None = Field(default=None, max_length=100)
     city: str | None = Field(default=None, max_length=100)
@@ -39,6 +45,8 @@ class ShopUpdate(BaseModel):
 
 
 class ShopResponse(BaseModel):
+    """A shop as returned by the API."""
+
     id: UUID
     name: str
     slug: str
@@ -51,6 +59,7 @@ class ShopResponse(BaseModel):
 
     @classmethod
     def from_view(cls, view: ShopView) -> "ShopResponse":
+        """Builds the response from a `ShopView`."""
         return cls(
             id=view.id,
             name=view.name,
@@ -65,6 +74,8 @@ class ShopResponse(BaseModel):
 
 
 class InvoiceDetailsBody(BaseModel):
+    """Legal details printed on invoices."""
+
     company_name: str = Field(default="", max_length=200)
     tax_id: str = Field(default="", max_length=50, description="NIF")
     trade_register: str = Field(default="", max_length=50, description="RCCM")
@@ -73,6 +84,8 @@ class InvoiceDetailsBody(BaseModel):
 
 
 class SettingsBody(BaseModel):
+    """Settings of a shop, both read and written. Delays in minutes, expiry in hours."""
+
     notification_number: str | None = Field(default=None, max_length=30)
     payment_modes: tuple[PaymentMode, ...] = (PaymentMode.CASH,)
     reminder_1_minutes: int = Field(default=15, ge=1, le=10_000)
@@ -87,6 +100,7 @@ class SettingsBody(BaseModel):
 
     @classmethod
     def from_view(cls, view: SettingsView) -> "SettingsBody":
+        """Builds the body from a `SettingsView`."""
         details = view.invoice_details
         return cls(
             notification_number=view.notification_number,
@@ -109,12 +123,15 @@ class SettingsBody(BaseModel):
         )
 
     def to_arguments(self) -> dict[str, object]:
+        """Keyword arguments for `ReplaceSettings.execute`."""
         arguments = self.model_dump(exclude={"invoice_details"})
         arguments["invoice_details"] = InvoiceDetails(**self.invoice_details.model_dump())
         return arguments
 
 
 class WhatsAppConnect(BaseModel):
+    """What the dashboard gets from Meta's Embedded Signup."""
+
     code: str = Field(min_length=1, max_length=2048)
     waba_id: str = Field(pattern=META_ID)
     phone_number_id: str = Field(pattern=META_ID)
@@ -126,6 +143,8 @@ class WhatsAppConnect(BaseModel):
 
 
 class WhatsAppResponse(BaseModel):
+    """The shop's WhatsApp connection, without its token."""
+
     status: WhatsAppStatus
     waba_id: str
     phone_number_id: str | None
@@ -137,6 +156,7 @@ class WhatsAppResponse(BaseModel):
 
     @classmethod
     def from_view(cls, view: WhatsAppView) -> "WhatsAppResponse":
+        """Builds the response from a `WhatsAppView`."""
         return cls(
             status=view.status,
             waba_id=view.waba_id,
@@ -150,6 +170,8 @@ class WhatsAppResponse(BaseModel):
 
 
 class ReceivingAccountBody(BaseModel):
+    """Mobile money account (Mixx or Moov) that receives the shop's payments."""
+
     operator: Operator
     number: str = Field(min_length=1, max_length=30)
     holder_name: str = Field(min_length=1, max_length=200)
@@ -157,10 +179,13 @@ class ReceivingAccountBody(BaseModel):
 
 
 class ReceivingAccountResponse(ReceivingAccountBody):
+    """The receiving account, and whether it has been verified."""
+
     verified: bool
 
     @classmethod
     def from_view(cls, view: ReceivingAccountView) -> "ReceivingAccountResponse":
+        """Builds the response from a `ReceivingAccountView`."""
         return cls(
             operator=view.operator,
             number=view.number,
@@ -171,19 +196,26 @@ class ReceivingAccountResponse(ReceivingAccountBody):
 
 
 class LogoUploadRequest(BaseModel):
+    """What the client is about to upload: JPEG, PNG or WebP, up to 8 MB."""
+
     content_type: str = Field(max_length=100)
     size: int = Field(description="Declared size in bytes")
 
 
 class LogoUploadResponse(BaseModel):
+    """Presigned URL to PUT the logo to, valid `expire_s` seconds."""
+
     logo_id: UUID
     upload_url: str
     expire_s: int
 
     @classmethod
     def from_upload(cls, upload: LogoUpload) -> "LogoUploadResponse":
+        """Builds the response from a `LogoUpload`."""
         return cls(logo_id=upload.logo_id, upload_url=upload.upload_url, expire_s=upload.expire_s)
 
 
 class LogoConfirm(BaseModel):
+    """Body of `POST /shops/{shop_id}/logo/confirm`."""
+
     logo_id: UUID

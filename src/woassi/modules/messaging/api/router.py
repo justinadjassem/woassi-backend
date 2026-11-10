@@ -1,3 +1,8 @@
+"""Meta webhook: one public endpoint for every shop, routed by `phone_number_id`.
+
+Public on purpose: Meta authenticates with the `X-Hub-Signature-256` HMAC, not a token.
+"""
+
 from typing import Annotated
 
 from fastapi import APIRouter, Header, Query, Request, Response, status
@@ -17,6 +22,7 @@ async def verify_webhook(
     token: Annotated[str | None, Query(alias="hub.verify_token")] = None,
     challenge: Annotated[str | None, Query(alias="hub.challenge")] = None,
 ) -> Response:
+    """Subscription handshake: echoes `hub.challenge` if `hub.verify_token` matches."""
     try:
         response = messaging.verify_meta_subscription().execute(
             mode=mode, token=token, challenge=challenge
@@ -33,6 +39,11 @@ async def receive_webhook(
     signature: Annotated[str | None, Header(alias="X-Hub-Signature-256")] = None,
 ) -> Response:
     # Raw body required: the signature covers the exact bytes sent by Meta.
+    """Checks the signature and queues the events for the worker.
+
+    Answers 200 as soon as they are queued, so Meta does not resend: retries are the worker's
+    job.
+    """
     body = await request.body()
     try:
         await messaging.receive_meta_webhook().execute(body=body, signature=signature)

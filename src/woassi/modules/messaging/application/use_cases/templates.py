@@ -1,3 +1,5 @@
+"""Message templates: submission when a shop connects, and approval checks before sending."""
+
 from collections.abc import Sequence
 from uuid import UUID
 
@@ -75,6 +77,7 @@ class ProvisionTemplates:
         status: TemplateStatus,
         submitted: object,
     ) -> None:
+        """Stores the status Meta gave for one template."""
         async with self._uow as uow:
             await uow.templates.save(
                 MessageTemplate(
@@ -102,6 +105,10 @@ class EnsureTemplateSendable:
         self._clock = clock
 
     async def execute(self, connection: ShopConnection, name: str, language: str) -> bool:
+        """True if the template can be sent now.
+
+        False if Meta has not approved it, does not know it, or cannot be reached.
+        """
         async with self._uow as uow:
             template = await uow.templates.get(connection.shop_id, name, language)
         if template is not None and template.sendable:

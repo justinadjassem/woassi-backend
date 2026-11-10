@@ -1,3 +1,5 @@
+"""SQLAlchemy models of the catalog module."""
+
 from datetime import datetime
 from typing import Any
 from uuid import UUID
@@ -20,6 +22,8 @@ from woassi.shared.infrastructure.db.base import Base
 
 
 class ProductModel(Base):
+    """Row of `products`. Photos load with the product (`selectin`)."""
+
     __tablename__ = "products"
     __table_args__ = (
         UniqueConstraint("shop_id", "retailer_id"),
@@ -49,6 +53,8 @@ class ProductModel(Base):
 
 
 class ProductPhotoModel(Base):
+    """Row of `product_photos`. `variants` maps each width (as a string) to its key."""
+
     __tablename__ = "product_photos"
     __table_args__ = (
         CheckConstraint("status IN ('PENDING', 'READY', 'REJECTED')", name="status_valid"),

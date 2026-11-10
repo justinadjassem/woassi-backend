@@ -1,9 +1,13 @@
+"""Webhook events, queued in arq."""
+
 from arq.connections import ArqRedis
 
 from woassi.modules.messaging.domain.event import MetaEvent
 
 
 class ArqEventQueue:
+    """Queues one `process_meta_event` job per webhook event."""
+
     def __init__(self, pool: ArqRedis) -> None:
         self._pool = pool
 

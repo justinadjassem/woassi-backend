@@ -1,3 +1,5 @@
+"""Secret encryption with Fernet (AES-128-CBC + HMAC-SHA256)."""
+
 from collections.abc import Sequence
 
 from cryptography.fernet import Fernet, InvalidToken, MultiFernet
@@ -17,9 +19,11 @@ class FernetSecretCipher:
         self._fernet = MultiFernet([Fernet(key) for key in keys])
 
     def encrypt(self, plaintext: str) -> str:
+        """Encrypts `plaintext` with the first key."""
         return self._fernet.encrypt(plaintext.encode()).decode()
 
     def decrypt(self, ciphertext: str) -> str:
+        """Decrypts with whichever key matches; raises SecretDecryptionError otherwise."""
         try:
             return self._fernet.decrypt(ciphertext.encode()).decode()
         except InvalidToken as error:

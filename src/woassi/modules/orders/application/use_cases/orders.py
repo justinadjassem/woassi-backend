@@ -1,3 +1,9 @@
+"""The order flow: from a WhatsApp cart to a confirmed or closed order.
+
+Each step commits first, then sends messages outside the transaction: a failed message never
+undoes a step.
+"""
+
 from dataclasses import dataclass, field
 from uuid import UUID
 
@@ -40,6 +46,8 @@ log = structlog.get_logger()
 
 @dataclass(frozen=True, slots=True)
 class Cart:
+    """A cart sent on WhatsApp: (retailer id, quantity) pairs, as the customer chose them."""
+
     message_id: str
     customer_id: UUID
     items: tuple[tuple[str, int], ...]  # (retailer_id, quantity)
@@ -66,6 +74,7 @@ class OrderFlow:
         self._clock = clock
 
     async def _profile(self, shop_id: UUID) -> ShopProfile:
+        """The shop's profile; raises OrderNotFound if the shop is gone."""
         profile = await self._shops.profile(shop_id)
         if profile is None:
             raise OrderNotFound(f"Shop {shop_id} not found.")
@@ -95,6 +104,7 @@ class OrderFlow:
     async def _ask_merchant(
         self, order: Order, profile: ShopProfile, customer: Contact, *, kind: str
     ) -> str | None:
+        """Sends the validation template to the merchant's notification number, if any."""
         if profile.notification_number is None:
             # No number to ask on WhatsApp: the order waits in the dashboard.
             return None
@@ -124,6 +134,10 @@ class OrderFlow:
 
 
 class ReceiveCart(OrderFlow):
+    """Turns a cart into an order: reserves stock, then confirms it, sends it to the merchant,
+    or offers the customer what is left.
+    """
+
     async def execute(self, *, shop_id: UUID, cart: Cart) -> UUID | None:
         """Return the order id, or None if this shop takes no orders."""
         profile = await self._shops.profile(shop_id)
@@ -249,6 +263,7 @@ class DecideOrder(OrderFlow):
         account_id: UUID,
         ip: str | None = None,
     ) -> Order:
+        """Raises OrderNotFound, or OrderNotOpen if the order no longer awaits the merchant."""
         profile = await self._profile(shop_id)
         async with self._uow as uow:
             order = await uow.orders.get(shop_id, order_id, lock=True)
@@ -277,6 +292,9 @@ class ProcessDueOrders(OrderFlow):
     """Cron job: reminds the merchant, then expires. Safe to run on several workers at once."""
 
     async def execute(self, *, limit: int = 200) -> int:
+        """Handles up to `limit` due orders; returns how many it moved. One failure skips that
+        order only.
+        """
         async with self._uow as uow:
             due = await uow.orders.list_due(self._clock.now(), limit)
         handled = 0
@@ -288,6 +306,7 @@ class ProcessDueOrders(OrderFlow):
         return handled
 
     async def _one(self, shop_id: UUID, order_id: UUID) -> int:
+        """Reminds or expires one order; returns 1 if it did something, 0 otherwise."""
         profile = await self._shops.profile(shop_id)
         async with self._uow as uow:
             order = await uow.orders.get(shop_id, order_id, lock=True)
@@ -321,6 +340,8 @@ class ProcessDueOrders(OrderFlow):
 
 @dataclass(frozen=True, slots=True)
 class OrderPage:
+    """One page of orders, and the total number of matching orders."""
+
     items: list[Order]
     total: int
     offset: int
@@ -328,6 +349,8 @@ class OrderPage:
 
 
 class ListOrders:
+    """Lists a shop's orders, one page at a time."""
+
     def __init__(self, uow: OrdersUnitOfWork) -> None:
         self._uow = uow
 
@@ -341,10 +364,13 @@ class ListOrders:
 
 
 class GetOrder:
+    """Returns one order of a shop."""
+
     def __init__(self, uow: OrdersUnitOfWork) -> None:
         self._uow = uow
 
     async def execute(self, *, shop_id: UUID, order_id: UUID) -> Order:
+        """Raises OrderNotFound if the shop has no such order."""
         async with self._uow as uow:
             order = await uow.orders.get(shop_id, order_id)
         if order is None:

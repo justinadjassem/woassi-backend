@@ -1,3 +1,5 @@
+"""Meta webhook: subscription handshake and event reception."""
+
 import hmac
 import json
 
@@ -9,10 +11,16 @@ from woassi.shared.domain.errors import InvalidData
 
 
 class VerifyMetaSubscription:
+    """Answers Meta's subscription check (`GET` with `hub.*` parameters)."""
+
     def __init__(self, verify_token: str) -> None:
         self._verify_token = verify_token
 
     def execute(self, *, mode: str | None, token: str | None, challenge: str | None) -> str:
+        """Returns `challenge` if the request is a valid subscription.
+
+        Raises VerificationRefused otherwise. The token is compared in constant time.
+        """
         token_is_valid = hmac.compare_digest((token or "").encode(), self._verify_token.encode())
         if mode != "subscribe" or not token_is_valid or challenge is None:
             raise VerificationRefused("Webhook verification refused.")
@@ -20,6 +28,8 @@ class VerifyMetaSubscription:
 
 
 class ReceiveMetaWebhook:
+    """Checks a webhook's signature and queues its events for the worker."""
+
     def __init__(self, app_secret: str, queue: EventQueue) -> None:
         self._app_secret = app_secret
         self._queue = queue
@@ -35,6 +45,7 @@ class ReceiveMetaWebhook:
         if not isinstance(payload, dict):
             raise InvalidData("Unexpected webhook body.")
 
+        # The signature is checked first: nothing is parsed from an unsigned body.
         events = extract_events(payload)
         for event in events:
             await self._queue.enqueue(event)

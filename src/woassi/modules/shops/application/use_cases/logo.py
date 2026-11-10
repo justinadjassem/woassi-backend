@@ -1,3 +1,8 @@
+"""Shop logo upload, in two steps: presigned upload URL, then confirmation.
+
+The original lands in the private uploads bucket; the WebP goes to the public bucket.
+"""
+
 from uuid import UUID, uuid4
 
 from woassi.modules.shops.application.dto import LogoUpload, ShopView, shop_view
@@ -12,12 +17,15 @@ MAX_SIZE_BYTES = 8 * 1024 * 1024
 
 
 class RequestLogoUpload:
+    """Returns a presigned URL to upload a new logo to."""
+
     def __init__(self, uow: ShopsUnitOfWork, uploads: StoragePort, *, expire_s: int = 600) -> None:
         self._uow = uow
         self._uploads = uploads
         self._expire_s = expire_s
 
     async def execute(self, *, shop_id: UUID, content_type: str, size: int) -> LogoUpload:
+        """Raises InvalidLogo for an unsupported type or size, ShopNotFound for an unknown shop."""
         if content_type not in ALLOWED_CONTENT_TYPES:
             raise InvalidLogo(f"Unsupported file type: {content_type}.")
         if not 0 < size <= MAX_SIZE_BYTES:
@@ -32,6 +40,8 @@ class RequestLogoUpload:
 
 
 class ConfirmLogo:
+    """Turns the uploaded logo into the shop's WebP logo, replacing the previous one."""
+
     def __init__(
         self,
         uow: ShopsUnitOfWork,
@@ -45,6 +55,9 @@ class ConfirmLogo:
         self._processor = processor
 
     async def execute(self, *, shop_id: UUID, logo_id: UUID) -> ShopView:
+        """Raises InvalidLogo if the file is missing, too large or unreadable (the upload is then
+        deleted).
+        """
         original = original_logo_key(shop_id, logo_id)
         info = await self._uploads.stat(original)
         if info is None:

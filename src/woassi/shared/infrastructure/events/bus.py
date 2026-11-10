@@ -1,3 +1,5 @@
+"""In-process event bus."""
+
 from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -11,11 +13,15 @@ log = structlog.get_logger()
 
 
 class DeferredDispatcher(Protocol):
+    """Hands a deferred subscriber's event over to the worker."""
+
     async def defer(self, subscriber: str, event: DomainEvent) -> None: ...
 
 
 @dataclass(frozen=True, slots=True)
 class _Subscriber:
+    """A registered handler. `name` identifies it in queued jobs."""
+
     name: str
     handler: Callable[[Any], Awaitable[None]]
     deferred: bool
@@ -42,6 +48,11 @@ class InProcessEventBus:
         name: str,
         deferred: bool = False,
     ) -> None:
+        """Registers `handler` for `event_type`.
+
+        `name` must be unique. With `deferred=True`, the handler runs in the worker instead of
+        in the publishing process.
+        """
         if name in self._by_name:
             raise ValueError(f"Subscriber {name} is already registered.")
         if deferred and self._dispatcher is None:
@@ -51,6 +62,10 @@ class InProcessEventBus:
         self._by_event[event_type].append(subscriber)
 
     async def publish(self, event: DomainEvent) -> None:
+        """Calls (or defers) every subscriber of `event`'s exact type.
+
+        Errors are logged, never raised: the action that produced the event is already committed.
+        """
         for subscriber in self._by_event.get(type(event), ()):
             try:
                 if subscriber.deferred:

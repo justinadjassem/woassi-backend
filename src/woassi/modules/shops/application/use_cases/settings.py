@@ -1,3 +1,5 @@
+"""Shop settings."""
+
 from uuid import UUID
 
 from woassi.modules.shops.application.dto import SettingsView, settings_view
@@ -14,6 +16,8 @@ from woassi.shared.application.ports import PhoneNormalizer
 
 
 class GetSettings:
+    """Returns a shop's settings."""
+
     def __init__(self, uow: ShopsUnitOfWork) -> None:
         self._uow = uow
 
@@ -24,6 +28,8 @@ class GetSettings:
 
 
 class ReplaceSettings:
+    """Replaces every setting of a shop at once."""
+
     def __init__(self, uow: ShopsUnitOfWork, phones: PhoneNormalizer) -> None:
         self._uow = uow
         self._phones = phones
@@ -44,6 +50,7 @@ class ReplaceSettings:
         validation_mode: ValidationMode = ValidationMode.MANUAL,
         auto_validation_max_amount: int | None = None,
     ) -> SettingsView:
+        """Raises InvalidData for an invalid notification number, InvalidSettings for bad values."""
         settings = ShopSettings(
             notification_number=(
                 self._phones.normalize(notification_number) if notification_number else None

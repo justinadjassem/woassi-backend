@@ -1,3 +1,10 @@
+"""Idempotency, in two forms:
+
+- `process_once` / `claim_key`: run a webhook or job once per key, in Postgres, inside the
+  caller's transaction;
+- `RedisIdempotencyStore`: remember HTTP responses by `Idempotency-Key`, in Redis.
+"""
+
 import base64
 import json
 from collections.abc import AsyncIterator
@@ -19,6 +26,8 @@ PENDING_TTL_S = 300
 
 
 class ProcessedKeyModel(Base):
+    """A (source, key) pair that was already processed, e.g. a Meta message id."""
+
     __tablename__ = "processed_keys"
 
     source: Mapped[str] = mapped_column(String(50), primary_key=True)
@@ -55,6 +64,7 @@ async def process_once(session: AsyncSession, source: str, key: str) -> AsyncIte
 
 
 def _dump(fingerprint: str, response: StoredResponse | None) -> str:
+    """Serializes a record to JSON; the body is base64 since it may not be text."""
     stored = None
     if response is not None:
         stored = {
@@ -66,6 +76,7 @@ def _dump(fingerprint: str, response: StoredResponse | None) -> str:
 
 
 def _load(raw: bytes) -> IdempotencyRecord:
+    """Parses a record written by `_dump`."""
     data = json.loads(raw)
     stored = data["response"]
     response = None
@@ -79,10 +90,17 @@ def _load(raw: bytes) -> IdempotencyRecord:
 
 
 class RedisIdempotencyStore:
+    """`IdempotencyStore` in Redis.
+
+    A key is reserved for `PENDING_TTL_S` while its request runs, then holds the response for
+    `RESPONSE_TTL_S`.
+    """
+
     def __init__(self, redis: ArqRedis) -> None:
         self._redis = redis
 
     async def begin(self, key: str, fingerprint: str) -> IdempotencyRecord | None:
+        """Reserves `key` with SET NX. Returns the existing record if it was taken."""
         reserved = await self._redis.set(
             self._name(key), _dump(fingerprint, None), nx=True, ex=PENDING_TTL_S
         )
@@ -94,11 +112,14 @@ class RedisIdempotencyStore:
         return _load(raw)
 
     async def complete(self, key: str, fingerprint: str, response: StoredResponse) -> None:
+        """Replaces the reservation with the response, kept for 24 hours."""
         await self._redis.set(self._name(key), _dump(fingerprint, response), ex=RESPONSE_TTL_S)
 
     async def release(self, key: str) -> None:
+        """Deletes the key, so the request can be retried."""
         await self._redis.delete(self._name(key))
 
     @staticmethod
     def _name(key: str) -> str:
+        """Redis key of an idempotency key."""
         return f"idempotency:{key}"

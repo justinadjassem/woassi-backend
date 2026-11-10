@@ -1,3 +1,5 @@
+"""Read-only access to a shop's audit log."""
+
 from collections.abc import Mapping
 from datetime import datetime
 from typing import Any
@@ -18,6 +20,8 @@ router = APIRouter(
 
 
 class AuditEntryResponse(BaseModel):
+    """One audit log entry, as returned by the API."""
+
     id: UUID
     account_id: UUID
     shop_id: UUID | None
@@ -30,6 +34,7 @@ class AuditEntryResponse(BaseModel):
 
     @classmethod
     def from_entry(cls, entry: AuditEntry) -> "AuditEntryResponse":
+        """Builds the response from a domain entry."""
         return cls(
             id=entry.id,
             account_id=entry.account_id,
@@ -47,5 +52,6 @@ class AuditEntryResponse(BaseModel):
 async def list_audit_entries(
     shop_id: UUID, shared: SharedDep, offset: Offset = 0, limit: Limit = 50
 ) -> Page[AuditEntryResponse]:
+    """Lists the shop's audit entries, newest first."""
     result = await shared.list_audit_entries().execute(shop_id=shop_id, offset=offset, limit=limit)
     return Page[AuditEntryResponse].from_result(result, AuditEntryResponse.from_entry)

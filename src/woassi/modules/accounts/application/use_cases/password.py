@@ -1,3 +1,5 @@
+"""Password use cases: reset by code, and change while logged in."""
+
 from uuid import UUID
 
 from woassi.modules.accounts.application.limits import (
@@ -27,6 +29,11 @@ from woassi.shared.domain.errors import Unauthorized
 
 
 class RequestPasswordReset:
+    """Sends a password reset code to a phone number.
+
+    Rate limited per phone, and neutral: the response never tells whether the phone exists.
+    """
+
     def __init__(
         self,
         uow: AccountsUnitOfWork,
@@ -52,6 +59,7 @@ class RequestPasswordReset:
             CODE_LIMIT,
             CODE_WINDOW_S,
         )
+        # Checked after the rate limit, so an invalid number costs an attempt too.
         if normalized is None:
             return
         async with self._uow as uow:
@@ -70,6 +78,8 @@ class RequestPasswordReset:
 
 
 class ResetPassword:
+    """Sets a new password with a reset code, then ends every session of the account."""
+
     def __init__(
         self,
         uow: AccountsUnitOfWork,
@@ -83,6 +93,13 @@ class ResetPassword:
         self._clock = clock
 
     async def execute(self, *, phone: str, code: str, new_password: str) -> None:
+        """Checks `code` and sets `new_password`.
+
+        Raises:
+            WeakPassword: `new_password` breaks the length rules.
+            InvalidCode: unknown phone, or wrong, expired or exhausted code (always the same
+            error).
+        """
         validate_password(new_password)
         normalized = parse_phone(self._phones, phone)
         async with self._uow as uow:
@@ -107,6 +124,8 @@ class ResetPassword:
 
 
 class ChangePassword:
+    """Changes the password of a logged-in account, which must give its current password."""
+
     def __init__(
         self,
         uow: AccountsUnitOfWork,
@@ -120,6 +139,13 @@ class ChangePassword:
         self._clock = clock
 
     async def execute(self, *, account_id: UUID, current_password: str, new_password: str) -> None:
+        """Checks `current_password`, then sets `new_password` and ends every session.
+
+        Raises:
+            WeakPassword: `new_password` breaks the length rules.
+            RateLimited: too many wrong current passwords.
+            WrongPassword: `current_password` is wrong.
+        """
         validate_password(new_password)
         key = password_change_key(account_id)
         await enforce(self._limiter, key, LOGIN_LIMIT, LOGIN_WINDOW_S)
@@ -134,4 +160,5 @@ class ChangePassword:
             # Every session ends, including one that a thief may have opened.
             await uow.refresh_tokens.revoke_all(account_id, self._clock.now())
             await uow.commit()
+        # Only failures count toward the limit.
         await self._limiter.forgive(key)

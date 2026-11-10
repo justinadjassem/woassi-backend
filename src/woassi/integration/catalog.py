@@ -1,3 +1,5 @@
+"""Catalog module seen from `orders`: stock reservation."""
+
 from collections.abc import Mapping
 from uuid import UUID
 
@@ -13,6 +15,10 @@ class CatalogStock:
         self._release = release
 
     async def reserve(self, shop_id: UUID, requested: Mapping[str, int]) -> list[StockItem]:
+        """Reserves what it can of each requested product, by retailer id.
+
+        Each item tells how much was requested and how much could be reserved.
+        """
         items = await self._reserve.execute(shop_id=shop_id, requested=requested)
         return [
             StockItem(
@@ -27,4 +33,5 @@ class CatalogStock:
         ]
 
     async def release(self, shop_id: UUID, quantities: Mapping[UUID, int]) -> None:
+        """Gives reserved quantities back to the stock, by product id."""
         await self._release.execute(shop_id=shop_id, quantities=quantities)

@@ -1,3 +1,5 @@
+"""SQLAlchemy implementations of the messaging repositories."""
+
 from collections.abc import Sequence
 from uuid import UUID
 
@@ -14,14 +16,18 @@ from woassi.shared.infrastructure.idempotency import claim_key
 
 
 class SqlAlchemyInbox:
+    """`Inbox` on the shared `processed_keys` table."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
     async def claim(self, source: str, key: str) -> bool:
+        """Claims `key` in the current transaction; False if it was already processed."""
         return await claim_key(self._session, source, key)
 
 
 def _copy(message: OutboundMessage, model: OutboundMessageModel) -> OutboundMessageModel:
+    """Copies every field of `message` onto `model`, and returns `model`."""
     model.id = message.id
     model.shop_id = message.shop_id
     model.recipient = message.recipient
@@ -34,6 +40,8 @@ def _copy(message: OutboundMessage, model: OutboundMessageModel) -> OutboundMess
 
 
 class SqlAlchemyOutboundMessages:
+    """`OutboundMessageRepository` on SQLAlchemy."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
@@ -58,6 +66,7 @@ class SqlAlchemyOutboundMessages:
         )
 
     async def save(self, message: OutboundMessage) -> None:
+        """Updates an existing message; raises LookupError if it does not exist."""
         model = await self._session.get(OutboundMessageModel, message.id)
         if model is None:
             raise LookupError(f"Outbound message {message.id} does not exist.")
@@ -66,6 +75,7 @@ class SqlAlchemyOutboundMessages:
 
 
 def _template(model: MessageTemplateModel) -> MessageTemplate:
+    """Converts a row to a domain `MessageTemplate`."""
     return MessageTemplate(
         shop_id=model.shop_id,
         waba_id=model.waba_id,
@@ -78,6 +88,8 @@ def _template(model: MessageTemplateModel) -> MessageTemplate:
 
 
 class SqlAlchemyMessageTemplates:
+    """`MessageTemplateRepository` on SQLAlchemy."""
+
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 

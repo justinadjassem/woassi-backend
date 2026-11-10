@@ -25,21 +25,27 @@ class GraphUnavailable(Exception):
 
 @dataclass(frozen=True, slots=True)
 class GraphResponse:
+    """Status code and JSON body of a Graph API answer, errors included."""
+
     status: int
     data: dict[str, Any]
 
     @property
     def ok(self) -> bool:
+        """True for a 2xx answer."""
         return 200 <= self.status < 300
 
     @property
     def error_code(self) -> int | None:
+        """Meta's numeric error code (`error.code`), if the body has one."""
         error = self.data.get("error")
         code = error.get("code") if isinstance(error, dict) else None
         return code if isinstance(code, int) else None
 
 
 class GraphClient:
+    """Sends requests to the Graph API of one version, e.g. `v23.0`."""
+
     def __init__(self, client: httpx.AsyncClient, *, graph_version: str) -> None:
         silence_url_logging()
         self._client = client
@@ -54,6 +60,11 @@ class GraphClient:
         json: dict[str, Any] | None = None,
         token: str | None = None,
     ) -> GraphResponse:
+        """Sends a request to `path` and returns Meta's answer, even an error one.
+
+        `token` goes in the `Authorization` header. Raises GraphUnavailable when there is no usable
+        answer: connection failure, timeout, or a body that is not JSON.
+        """
         headers = {"Authorization": f"Bearer {token}"} if token else None
         try:
             response = await self._client.request(

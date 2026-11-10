@@ -1,3 +1,5 @@
+"""Request and response bodies of the accounts api."""
+
 from datetime import datetime
 from typing import Literal
 from uuid import UUID
@@ -14,6 +16,8 @@ Password = Field(max_length=1024)
 
 
 class RegisterRequest(BaseModel):
+    """Body of `POST /auth/register`."""
+
     full_name: str = Field(min_length=1, max_length=200)
     phone: str = Phone
     password: str = Password
@@ -21,11 +25,15 @@ class RegisterRequest(BaseModel):
 
 
 class VerifyPhoneRequest(BaseModel):
+    """Body of `POST /auth/verify`."""
+
     phone: str = Phone
     code: str = Field(max_length=6)
 
 
 class LoginRequest(BaseModel):
+    """Body of `POST /auth/login`."""
+
     phone: str = Phone
     password: str = Password
 
@@ -37,26 +45,36 @@ class RefreshRequest(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
+    """Body of `POST /auth/password/request`."""
+
     phone: str = Phone
 
 
 class PasswordReset(BaseModel):
+    """Body of `POST /auth/password/reset`."""
+
     phone: str = Phone
     code: str = Field(max_length=6)
     new_password: str = Password
 
 
 class PasswordChange(BaseModel):
+    """Body of `POST /me/password`."""
+
     current_password: str = Password
     new_password: str = Password
 
 
 class AccountUpdate(BaseModel):
+    """Body of `PATCH /me`: only the fields sent are changed."""
+
     full_name: str | None = Field(default=None, min_length=1, max_length=200)
     email: str | None = Field(default=None, max_length=254, pattern=EMAIL_PATTERN)
 
 
 class AccountResponse(BaseModel):
+    """An account, as returned by the API. Never includes the password hash."""
+
     id: UUID
     full_name: str
     phone: str
@@ -68,6 +86,7 @@ class AccountResponse(BaseModel):
 
     @classmethod
     def from_view(cls, view: AccountView) -> "AccountResponse":
+        """Builds the response from an `AccountView`."""
         return cls(
             id=view.id,
             full_name=view.full_name,
@@ -81,6 +100,8 @@ class AccountResponse(BaseModel):
 
 
 class TokenResponse(BaseModel):
+    """Token pair; `expires_in` is the access token lifetime in seconds."""
+
     access_token: str
     token_type: Literal["bearer"] = "bearer"
     expires_in: int
@@ -88,6 +109,7 @@ class TokenResponse(BaseModel):
 
     @classmethod
     def from_pair(cls, pair: TokenPair) -> "TokenResponse":
+        """Builds the response from a `TokenPair`."""
         return cls(
             access_token=pair.access_token,
             expires_in=pair.expires_in,

@@ -1,3 +1,5 @@
+"""SQLAlchemy implementation of the product repository."""
+
 from collections.abc import Callable, Sequence
 from uuid import UUID
 
@@ -13,6 +15,7 @@ from woassi.shared.domain.values import Amount
 
 
 def _photo_to_domain(model: ProductPhotoModel) -> ProductPhoto:
+    """Converts a photo row to a domain `ProductPhoto`."""
     return ProductPhoto(
         id=model.id,
         product_id=model.product_id,
@@ -26,6 +29,7 @@ def _photo_to_domain(model: ProductPhotoModel) -> ProductPhoto:
 
 
 def _to_domain(model: ProductModel) -> Product:
+    """Converts a product row, with its photos, to a domain `Product`."""
     return Product(
         id=model.id,
         shop_id=model.shop_id,
@@ -40,6 +44,7 @@ def _to_domain(model: ProductModel) -> Product:
 
 
 def _copy_photo(photo: ProductPhoto, model: ProductPhotoModel) -> ProductPhotoModel:
+    """Copies every field of `photo` onto `model`, and returns `model`."""
     model.id = photo.id
     model.product_id = photo.product_id
     model.original_key = photo.original_key
@@ -51,6 +56,7 @@ def _copy_photo(photo: ProductPhoto, model: ProductPhotoModel) -> ProductPhotoMo
 
 
 def _copy_product(product: Product, model: ProductModel) -> ProductModel:
+    """Copies `product` onto `model`, reusing existing photo rows and adding new ones."""
     existing = {photo.id: photo for photo in model.photos}
     model.id = product.id
     model.shop_id = product.shop_id
@@ -68,6 +74,8 @@ def _copy_product(product: Product, model: ProductModel) -> ProductModel:
 
 
 class SqlAlchemyProductRepository:
+    """`ProductRepository` on SQLAlchemy. Saved products are tracked for their events."""
+
     def __init__(self, session: AsyncSession, track: Callable[[Entity], None]) -> None:
         self._session = session
         self._track = track
@@ -120,6 +128,7 @@ class SqlAlchemyProductRepository:
         self, shop_id: UUID, *, retailer_ids: Sequence[str] = (), ids: Sequence[UUID] = ()
     ) -> Sequence[Product]:
         # Always in id order: two orders locking the same products cannot deadlock.
+        """Products matching either a retailer id or an id, locked `FOR UPDATE`."""
         models = await self._session.scalars(
             select(ProductModel)
             .where(
@@ -132,6 +141,7 @@ class SqlAlchemyProductRepository:
         return [_to_domain(model) for model in models]
 
     async def save(self, product: Product) -> None:
+        """Updates an existing product; raises ProductNotFound if it is gone."""
         model = await self._session.get(ProductModel, product.id)
         if model is None:
             raise ProductNotFound(f"Product {product.id} not found.")

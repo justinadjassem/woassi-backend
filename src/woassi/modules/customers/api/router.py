@@ -1,3 +1,5 @@
+"""Customer routes of a shop (read-only: customers are created by their messages)."""
+
 from datetime import datetime
 from uuid import UUID
 
@@ -17,6 +19,8 @@ router = APIRouter(
 
 
 class CustomerResponse(BaseModel):
+    """A customer as returned by the API. `user_id` is Meta's BSUID."""
+
     id: UUID
     user_id: str | None
     phone: str | None
@@ -26,6 +30,7 @@ class CustomerResponse(BaseModel):
 
     @classmethod
     def from_view(cls, view: CustomerView) -> "CustomerResponse":
+        """Builds the response from a `CustomerView`."""
         return cls(
             id=view.id,
             user_id=view.user_id,
@@ -40,6 +45,7 @@ class CustomerResponse(BaseModel):
 async def list_customers(
     shop_id: UUID, customers: CustomersDep, offset: Offset = 0, limit: Limit = 50
 ) -> Page[CustomerResponse]:
+    """Lists the shop's customers, most recently active first."""
     result = await customers.list_customers().execute(shop_id=shop_id, offset=offset, limit=limit)
     return Page[CustomerResponse].from_result(result, CustomerResponse.from_view)
 
@@ -48,5 +54,6 @@ async def list_customers(
 async def get_customer(
     shop_id: UUID, customer_id: UUID, customers: CustomersDep
 ) -> CustomerResponse:
+    """One customer of the shop."""
     view = await customers.get_customer().execute(shop_id=shop_id, customer_id=customer_id)
     return CustomerResponse.from_view(view)

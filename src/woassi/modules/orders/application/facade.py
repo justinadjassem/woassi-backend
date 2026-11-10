@@ -1,3 +1,5 @@
+"""Use cases the orders api needs, provided by the composition root."""
+
 from typing import Protocol
 
 from woassi.modules.orders.application.use_cases.orders import DecideOrder, GetOrder, ListOrders

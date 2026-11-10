@@ -1,3 +1,5 @@
+"""Base Unit of Work: one session, one transaction, events published after the commit."""
+
 from types import TracebackType
 from typing import Self
 
@@ -22,6 +24,7 @@ class SqlAlchemyUnitOfWork:
 
     @property
     def audit(self) -> AuditLog:
+        """Audit log writing in this Unit of Work's transaction."""
         return SqlAlchemyAuditLog(self._active_session(), self._clock)
 
     async def __aenter__(self) -> Self:
@@ -41,23 +44,31 @@ class SqlAlchemyUnitOfWork:
         await session.close()
 
     async def commit(self) -> None:
+        """Commits, then publishes the events of every tracked entity.
+
+        Events are published after the commit, so a crash in between loses them (at most once).
+        """
         await self._active_session().commit()
         for event in self._pull_events():
             await self._event_bus.publish(event)
 
     async def rollback(self) -> None:
+        """Rolls back and drops the pending events: what did not happen is not announced."""
         await self._active_session().rollback()
         self._pull_events()
 
     def _track(self, entity: Entity) -> None:
+        """Called by repositories on every saved entity, to publish its events."""
         self._tracked.append(entity)
 
     def _pull_events(self) -> list[DomainEvent]:
+        """Collects the events of every tracked entity and stops tracking them."""
         events = [event for entity in self._tracked for event in entity.pull_events()]
         self._tracked.clear()
         return events
 
     def _active_session(self) -> AsyncSession:
+        """The open session; raises if used outside `async with`."""
         if self._session is None:
             raise RuntimeError("Unit of Work used outside `async with`.")
         return self._session

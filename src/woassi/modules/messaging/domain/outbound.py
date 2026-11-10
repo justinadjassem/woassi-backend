@@ -1,3 +1,5 @@
+"""Messages sent by shops, and their delivery status."""
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -5,6 +7,8 @@ from uuid import UUID
 
 
 class OutboundStatus(StrEnum):
+    """Delivery status. Only moves forward, and FAILED is final."""
+
     ACCEPTED = "ACCEPTED"  # by the API; delivery is reported later through webhooks
     SENT = "SENT"
     DELIVERED = "DELIVERED"
@@ -28,11 +32,14 @@ _FROM_META = {
 
 
 def status_from_meta(value: str) -> OutboundStatus | None:
+    """Status matching Meta's `status` value, or None for one we do not track."""
     return _FROM_META.get(value)
 
 
 @dataclass(slots=True)
 class OutboundMessage:
+    """A message a shop sent. `kind` tells what for, e.g. `order.validation`."""
+
     id: str  # Meta's message id (wamid)
     shop_id: UUID
     recipient: str = field(repr=False)

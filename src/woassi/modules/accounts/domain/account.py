@@ -1,3 +1,5 @@
+"""The merchant account: who logs in and owns shops."""
+
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import StrEnum
@@ -13,6 +15,7 @@ MAX_PASSWORD_LENGTH = 128  # Argon2 is deliberately slow: do not let clients fee
 
 
 def validate_password(password: str) -> None:
+    """Raises WeakPassword unless the password has 8 to 128 characters."""
     if not MIN_PASSWORD_LENGTH <= len(password) <= MAX_PASSWORD_LENGTH:
         raise WeakPassword(
             f"A password must be {MIN_PASSWORD_LENGTH} to {MAX_PASSWORD_LENGTH} characters long."
@@ -20,6 +23,7 @@ def validate_password(password: str) -> None:
 
 
 def _clean_name(full_name: str) -> str:
+    """Strips `full_name`; raises InvalidAccount if nothing is left."""
     full_name = full_name.strip()
     if not full_name:
         raise InvalidAccount("Full name is required.")
@@ -27,12 +31,16 @@ def _clean_name(full_name: str) -> str:
 
 
 class AccountStatus(StrEnum):
+    """A suspended account can no longer log in or use its tokens."""
+
     ACTIVE = "ACTIVE"
     SUSPENDED = "SUSPENDED"
 
 
 @dataclass(slots=True)
 class Account(Entity):
+    """A merchant account, identified by its phone number."""
+
     id: UUID
     full_name: str
     phone: PhoneNumber
@@ -53,6 +61,7 @@ class Account(Entity):
         now: datetime,
         email: str | None = None,
     ) -> "Account":
+        """Creates an active, unverified account, and records `AccountCreated`."""
         account = cls(
             id=uuid4(),
             full_name=_clean_name(full_name),
@@ -66,25 +75,32 @@ class Account(Entity):
 
     @property
     def is_active(self) -> bool:
+        """True unless the account is suspended."""
         return self.status is AccountStatus.ACTIVE
 
     def record_login(self, now: datetime) -> None:
+        """Stamps a successful login. Raises AccountSuspended for a suspended account."""
         if not self.is_active:
             raise AccountSuspended("This account is suspended.")
         self.last_login_at = now
         self.record_event(AccountLoggedIn(account_id=self.id))
 
     def verify_phone(self) -> None:
+        """The owner proved they receive codes on this phone number."""
         self.phone_verified = True
 
     def change_password(self, password_hash: str) -> None:
+        """Replaces the password hash. Ending the sessions is the caller's job."""
         self.password_hash = password_hash
 
     def rename(self, full_name: str) -> None:
+        """Changes the full name; raises InvalidAccount if it is blank."""
         self.full_name = _clean_name(full_name)
 
     def change_email(self, email: str | None) -> None:
+        """Sets or removes (None) the email address."""
         self.email = email
 
     def suspend(self) -> None:
+        """Blocks the account: no login, and its access tokens stop working."""
         self.status = AccountStatus.SUSPENDED

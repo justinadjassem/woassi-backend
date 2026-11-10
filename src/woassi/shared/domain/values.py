@@ -1,3 +1,5 @@
+"""Value objects shared by every module."""
+
 import re
 from dataclasses import dataclass
 
@@ -19,12 +21,15 @@ class Amount:
             raise InvalidData("An amount cannot be negative.", code="amount.negative")
 
     def __add__(self, other: "Amount") -> "Amount":
+        """Sum of two amounts."""
         return Amount(self.value + other.value)
 
     def __mul__(self, quantity: int) -> "Amount":
+        """Amount for `quantity` units, e.g. a line total."""
         return Amount(self.value * quantity)
 
     def __str__(self) -> str:
+        """Display form with a space as thousands separator: `12 500 FCFA`."""
         return f"{self.value:,} FCFA".replace(",", " ")
 
 

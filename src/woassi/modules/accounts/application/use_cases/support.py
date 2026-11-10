@@ -38,6 +38,10 @@ async def issue_tokens(
     family_id: UUID,
     refresh_ttl_s: int,
 ) -> TokenPair:
+    """Creates a token pair: a new access token, and a refresh token stored in `family_id`.
+
+    The caller commits. Pass a new family id for a login, the current one for a rotation.
+    """
     access = tokens.issue_access_token(account_id)
     refresh = tokens.new_refresh_token()
     await uow.refresh_tokens.add(
