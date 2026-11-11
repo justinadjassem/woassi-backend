@@ -5,6 +5,7 @@ import pytest
 
 from woassi.modules.messaging.domain.content import (
     ButtonsMessage,
+    DocumentMessage,
     Recipient,
     ReplyButton,
     TemplateMessage,
@@ -100,3 +101,24 @@ def test_failure_is_final() -> None:
     assert message.error_code == 131047
     assert not message.apply(OutboundStatus.DELIVERED, None, NOW)
     assert message.status is OutboundStatus.FAILED
+
+
+@pytest.mark.parametrize(
+    ("link", "filename", "caption"),
+    [
+        ("ftp://files/a.pdf", "a.pdf", None),
+        ("https://files/a.pdf", "", None),
+        ("https://files/a.pdf", "invoice", None),
+        ("https://files/a.pdf", "a.pdf", ""),
+        ("https://files/a.pdf", "a.pdf", "x" * 1025),
+    ],
+)
+def test_document_limits(link: str, filename: str, caption: str | None) -> None:
+    with pytest.raises(InvalidMessage):
+        DocumentMessage(link, filename, caption)
+
+
+def test_document_link_stays_out_of_repr() -> None:
+    message = DocumentMessage("https://files/a.pdf?X-Amz-Signature=secret", "a.pdf", "Ama")
+    assert "secret" not in repr(message)
+    assert "Ama" not in repr(message)

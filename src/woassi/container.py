@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 
 import httpx
+import structlog
 from arq import create_pool
 from arq.connections import ArqRedis, RedisSettings
 from minio import Minio
@@ -10,13 +11,26 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
 from woassi.config import Settings
 from woassi.integration.accounts import AccountsAuthenticator
+from woassi.integration.billing import (
+    BillingNotifications,
+    CustomersForBilling,
+    OrdersForBilling,
+    ShopsForBilling,
+)
 from woassi.integration.catalog import CatalogStock
 from woassi.integration.customers import CustomerContacts
 from woassi.integration.images import CatalogLogoProcessor
 from woassi.integration.messaging import WhatsAppNotifications, template_definitions
 from woassi.integration.orders import OrdersInboundHandler
+from woassi.integration.payments import (
+    CustomersForPayments,
+    OrdersForPayments,
+    PaymentNotifications,
+    ShopsForPayments,
+)
 from woassi.integration.shops import (
     ShopsConnections,
+    ShopsMetaCatalogs,
     ShopsOrderProfiles,
     ShopsOwnership,
     ShopsWhatsAppAccounts,
@@ -45,11 +59,40 @@ from woassi.modules.accounts.application.use_cases.session import (
 from woassi.modules.accounts.infrastructure.code_sender import LogVerificationCodeSender
 from woassi.modules.accounts.infrastructure.security import Argon2PasswordHasher, JwtTokenService
 from woassi.modules.accounts.infrastructure.uow import SqlAlchemyAccountsUoW
+from woassi.modules.billing.application.facade import BillingUseCases
+from woassi.modules.billing.application.ports import BillingUnitOfWork, InvoiceCertifier
+from woassi.modules.billing.application.use_cases.credit_notes import IssueCreditNote
+from woassi.modules.billing.application.use_cases.issuing import (
+    IssueInvoice,
+    PrepareDocument,
+    ResendInvoice,
+)
+from woassi.modules.billing.application.use_cases.queries import (
+    GetBillingDocument,
+    GetBillingSummary,
+    GetDocumentPdf,
+    ListBillingDocuments,
+    OpenInvoiceLink,
+)
+from woassi.modules.billing.application.use_cases.release import BillingSettings, DocumentRelease
+from woassi.modules.billing.domain.events import CreditNoteIssued
+from woassi.modules.billing.infrastructure.certifier import NoCertificationRequired
+from woassi.modules.billing.infrastructure.pdf import FpdfDocumentRenderer
+from woassi.modules.billing.infrastructure.uow import SqlAlchemyBillingUoW
 from woassi.modules.catalog.application.facade import CatalogUseCases
 from woassi.modules.catalog.application.ports import (
+    CatalogSyncQueue,
     CatalogUnitOfWork,
     ImageProcessor,
+    MetaCatalogAccessPort,
+    MetaCatalogPort,
     PhotoJobQueue,
+)
+from woassi.modules.catalog.application.use_cases.meta_sync import (
+    RequestCatalogResync,
+    RequestCatalogSync,
+    RetryCatalogSync,
+    SyncCatalogToMeta,
 )
 from woassi.modules.catalog.application.use_cases.photos import (
     ConfirmPhoto,
@@ -60,10 +103,14 @@ from woassi.modules.catalog.application.use_cases.products import (
     CreateProduct,
     GetProduct,
     ListProducts,
+    UpdateProduct,
 )
 from woassi.modules.catalog.application.use_cases.stock import ReleaseStock, ReserveStock
+from woassi.modules.catalog.domain.events import ProductMetaSyncRequested
 from woassi.modules.catalog.infrastructure.image_processor import PillowImageProcessor
+from woassi.modules.catalog.infrastructure.meta_catalog import GraphMetaCatalog
 from woassi.modules.catalog.infrastructure.photo_queue import ArqPhotoJobQueue
+from woassi.modules.catalog.infrastructure.sync_queue import ArqCatalogSyncQueue
 from woassi.modules.catalog.infrastructure.uow import SqlAlchemyCatalogUoW
 from woassi.modules.customers.application.facade import CustomersUseCases
 from woassi.modules.customers.application.ports import CustomersUnitOfWork
@@ -109,12 +156,39 @@ from woassi.modules.orders.application.use_cases.orders import (
     DecideOrder,
     GetOrder,
     ListOrders,
+    MarkOrderPaid,
     OrderFlow,
     ProcessDueOrders,
     ReceiveCart,
     ReplyToOrder,
 )
+from woassi.modules.orders.domain.events import OrderConfirmed
 from woassi.modules.orders.infrastructure.uow import SqlAlchemyOrdersUoW
+from woassi.modules.payments.application.facade import PaymentsUseCases
+from woassi.modules.payments.application.ports import PaymentGateway, PaymentsUnitOfWork
+from woassi.modules.payments.application.use_cases.conversation import (
+    ReceivePayerNumber,
+    ReplyToPayment,
+)
+from woassi.modules.payments.application.use_cases.flow import CheckoutSettings, PaymentFlow
+from woassi.modules.payments.application.use_cases.manual import RecordManualPayment
+from woassi.modules.payments.application.use_cases.provider import (
+    ConfigurePaymentProvider,
+    GetPaymentProvider,
+    RemovePaymentProvider,
+)
+from woassi.modules.payments.application.use_cases.queries import GetPayment, ListPayments
+from woassi.modules.payments.application.use_cases.requests import RequestPayment
+from woassi.modules.payments.application.use_cases.verification import (
+    PollPendingPayments,
+    ReceiveKPrimePayWebhook,
+    VerifyPayment,
+)
+from woassi.modules.payments.domain.errors import ProviderNotConfigured
+from woassi.modules.payments.domain.events import PaymentConfirmed
+from woassi.modules.payments.infrastructure.check_queue import ArqPaymentCheckQueue
+from woassi.modules.payments.infrastructure.kprimepay import HttpxKPrimePay
+from woassi.modules.payments.infrastructure.uow import SqlAlchemyPaymentsUoW
 from woassi.modules.shops.application.facade import ShopsUseCases
 from woassi.modules.shops.application.ports import (
     LogoProcessor,
@@ -133,9 +207,11 @@ from woassi.modules.shops.application.use_cases.shops import (
     CheckShopOwnership,
     CreateShop,
     GetShop,
+    GetShopBillingProfile,
     GetShopOrderProfile,
     ListShops,
     ResolveShopByPhoneNumber,
+    ResolveShopCatalog,
     ResolveShopConnection,
     UpdateShop,
 )
@@ -163,6 +239,7 @@ from woassi.shared.application.ports import (
     UnitOfWork,
 )
 from woassi.shared.application.readiness import CheckReadiness
+from woassi.shared.domain.errors import DomainError
 from woassi.shared.infrastructure.clock import SystemClock
 from woassi.shared.infrastructure.crypto import FernetSecretCipher
 from woassi.shared.infrastructure.db.session import create_engine, create_session_factory
@@ -175,6 +252,8 @@ from woassi.shared.infrastructure.meta_graph import GraphClient
 from woassi.shared.infrastructure.phone import PhonenumbersNormalizer
 from woassi.shared.infrastructure.rate_limiter import RedisRateLimiter
 from woassi.shared.infrastructure.storage.minio_storage import MinioStorage
+
+log = structlog.get_logger()
 
 
 def _minio_client(endpoint: str, settings: Settings) -> Minio:
@@ -199,10 +278,12 @@ def _code_sender(settings: Settings) -> VerificationCodeSender:
 @dataclass
 class Container(
     AccountsUseCases,
+    BillingUseCases,
     CatalogUseCases,
     CustomersUseCases,
     MessagingUseCases,
     OrdersUseCases,
+    PaymentsUseCases,
     SharedUseCases,
     ShopsUseCases,
 ):
@@ -274,6 +355,72 @@ class Container(
             deferred=True,
         )
 
+        async def request_payment(event: OrderConfirmed) -> None:
+            try:
+                await self.request_payment().execute(shop_id=event.shop_id, order_id=event.order_id)
+            except ProviderNotConfigured:
+                # No KPrimePay account: the merchant records the payment by hand.
+                return
+            except DomainError as error:
+                log.warning("payment_not_requested", order_id=str(event.order_id), code=error.code)
+
+        # Deferred: KPrimePay and WhatsApp calls, which must not slow down the confirmation.
+        self.event_bus.subscribe(
+            OrderConfirmed, request_payment, name="payments.request_payment", deferred=True
+        )
+
+        async def mark_paid(event: PaymentConfirmed) -> None:
+            await self.mark_order_paid().execute(shop_id=event.shop_id, order_id=event.order_id)
+
+        self.event_bus.subscribe(
+            PaymentConfirmed, mark_paid, name="orders.mark_paid", deferred=True
+        )
+
+        async def issue_invoice(event: PaymentConfirmed) -> None:
+            await self.issue_invoice().execute(
+                shop_id=event.shop_id,
+                order_id=event.order_id,
+                payment_id=event.payment_id,
+                method=event.method,
+                amount=event.amount,
+                paid_at=event.paid_at,
+            )
+
+        # Deferred: rendering the PDF is CPU work, and sending it calls Meta.
+        self.event_bus.subscribe(
+            PaymentConfirmed, issue_invoice, name="billing.issue_invoice", deferred=True
+        )
+
+        async def render_credit_note(event: CreditNoteIssued) -> None:
+            await self.prepare_billing_document().execute(
+                shop_id=event.shop_id, document_id=event.document_id
+            )
+
+        self.event_bus.subscribe(
+            CreditNoteIssued, render_credit_note, name="billing.render_credit_note", deferred=True
+        )
+
+        async def sync_to_meta(event: ProductMetaSyncRequested) -> None:
+            await self.request_catalog_sync().execute(event.shop_id)
+
+        # Not deferred: it only queues the shop's `sync_catalog` job, whose fixed id gathers
+        # every change of the next seconds into one Graph call. A deferred subscriber would
+        # cost one more job per change for the same result.
+        self.event_bus.subscribe(
+            ProductMetaSyncRequested, sync_to_meta, name="catalog.sync_to_meta"
+        )
+
+        async def resync_catalog(event: WhatsAppConnected) -> None:
+            await self.request_catalog_resync().execute(event.shop_id)
+
+        # Deferred: it locks and rewrites every product of the shop.
+        self.event_bus.subscribe(
+            WhatsAppConnected,
+            resync_catalog,
+            name="catalog.resync_on_whatsapp_connected",
+            deferred=True,
+        )
+
     async def close(self) -> None:
         """Closes the HTTP client, the Redis pool and the database engine."""
         await self.http.aclose()
@@ -330,6 +477,8 @@ class Container(
             ChangeCustomerUserId(self.customers_uow()),
             self.receive_cart(),
             self.reply_to_order(),
+            self._payment_flow(ReplyToPayment),
+            self._payment_flow(ReceivePayerNumber),
             self.clock,
         )
 
@@ -343,7 +492,10 @@ class Container(
         return ShopsOrderProfiles(GetShopOrderProfile(self.shops_uow()))
 
     def order_catalog(self) -> CatalogPort:
-        return CatalogStock(ReserveStock(self.catalog_uow()), ReleaseStock(self.catalog_uow()))
+        return CatalogStock(
+            ReserveStock(self.catalog_uow(), self.clock),
+            ReleaseStock(self.catalog_uow(), self.clock),
+        )
 
     def order_customers(self) -> CustomersPort:
         return CustomerContacts(GetCustomer(self.customers_uow()))
@@ -378,11 +530,138 @@ class Container(
     def process_due_orders(self) -> ProcessDueOrders:
         return self._order_flow(ProcessDueOrders)
 
+    def mark_order_paid(self) -> MarkOrderPaid:
+        return MarkOrderPaid(self.orders_uow(), self.clock)
+
     def list_orders(self) -> ListOrders:
         return ListOrders(self.orders_uow())
 
     def get_order(self) -> GetOrder:
         return GetOrder(self.orders_uow())
+
+    # Use cases: payments
+    def payments_uow(self) -> PaymentsUnitOfWork:
+        return SqlAlchemyPaymentsUoW(self.sessions, self.event_bus, self.clock)
+
+    def payment_gateway(self) -> PaymentGateway:
+        return HttpxKPrimePay(
+            self.http,
+            base_url=self.settings.kprimepay_base_url,
+            timeout=httpx.Timeout(
+                self.settings.kprimepay_read_timeout_s,
+                connect=self.settings.kprimepay_connect_timeout_s,
+            ),
+        )
+
+    def _payment_flow[F: PaymentFlow](self, use_case: type[F]) -> F:
+        """Builds a KPrimePay use case with all its ports."""
+        return use_case(
+            self.payments_uow(),
+            self.payment_gateway(),
+            OrdersForPayments(GetOrder(self.orders_uow())),
+            ShopsForPayments(GetShopOrderProfile(self.shops_uow())),
+            CustomersForPayments(GetCustomer(self.customers_uow())),
+            PaymentNotifications(self.send_whatsapp_message()),
+            self.cipher,
+            self.phone_normalizer(),
+            self.clock,
+            CheckoutSettings(
+                return_url=self.settings.payment_return_url_or_default,
+                callback_base_url=self.settings.public_base_url or None,
+            ),
+        )
+
+    def configure_payment_provider(self) -> ConfigurePaymentProvider:
+        return ConfigurePaymentProvider(
+            self.payments_uow(), self.payment_gateway(), self.cipher, self.clock
+        )
+
+    def get_payment_provider(self) -> GetPaymentProvider:
+        return GetPaymentProvider(self.payments_uow())
+
+    def remove_payment_provider(self) -> RemovePaymentProvider:
+        return RemovePaymentProvider(self.payments_uow())
+
+    def list_payments(self) -> ListPayments:
+        return ListPayments(self.payments_uow())
+
+    def get_payment(self) -> GetPayment:
+        return GetPayment(self.payments_uow())
+
+    def record_manual_payment(self) -> RecordManualPayment:
+        return RecordManualPayment(
+            self.payments_uow(), OrdersForPayments(GetOrder(self.orders_uow())), self.clock
+        )
+
+    def request_payment(self) -> RequestPayment:
+        return self._payment_flow(RequestPayment)
+
+    def verify_payment(self) -> VerifyPayment:
+        return self._payment_flow(VerifyPayment)
+
+    def poll_pending_payments(self) -> PollPendingPayments:
+        return self._payment_flow(PollPendingPayments)
+
+    def receive_kprimepay_webhook(self) -> ReceiveKPrimePayWebhook:
+        return ReceiveKPrimePayWebhook(
+            self.payments_uow(), ArqPaymentCheckQueue(self.arq), self.rate_limiter()
+        )
+
+    # Use cases: billing
+    def billing_uow(self) -> BillingUnitOfWork:
+        return SqlAlchemyBillingUoW(self.sessions, self.event_bus, self.clock)
+
+    def invoice_certifier(self) -> InvoiceCertifier:
+        # The OTR adapter goes here once the certified e-invoice platform exists.
+        return NoCertificationRequired()
+
+    def document_release(self) -> DocumentRelease:
+        return DocumentRelease(
+            self.billing_uow(),
+            self.documents,
+            FpdfDocumentRenderer(),
+            self.invoice_certifier(),
+            ShopsForBilling(GetShopBillingProfile(self.shops_uow()), self.product_images),
+            CustomersForBilling(GetCustomer(self.customers_uow())),
+            BillingNotifications(self.send_whatsapp_message()),
+            self.clock,
+            BillingSettings(public_base_url=self.settings.public_base_url or None),
+        )
+
+    def issue_invoice(self) -> IssueInvoice:
+        return IssueInvoice(
+            self.billing_uow(),
+            OrdersForBilling(GetOrder(self.orders_uow())),
+            ShopsForBilling(GetShopBillingProfile(self.shops_uow()), self.product_images),
+            CustomersForBilling(GetCustomer(self.customers_uow())),
+            self.invoice_certifier(),
+            self.document_release(),
+            self.clock,
+        )
+
+    def prepare_billing_document(self) -> PrepareDocument:
+        return PrepareDocument(self.billing_uow(), self.document_release())
+
+    def resend_invoice(self) -> ResendInvoice:
+        return ResendInvoice(self.billing_uow(), self.document_release())
+
+    def issue_credit_note(self) -> IssueCreditNote:
+        return IssueCreditNote(self.billing_uow(), self.invoice_certifier(), self.clock)
+
+    def list_billing_documents(self) -> ListBillingDocuments:
+        return ListBillingDocuments(self.billing_uow())
+
+    def get_billing_document(self) -> GetBillingDocument:
+        return GetBillingDocument(self.billing_uow())
+
+    def get_document_pdf(self) -> GetDocumentPdf:
+        return GetDocumentPdf(self.billing_uow(), self.documents)
+
+    def open_invoice_link(self) -> OpenInvoiceLink:
+        return OpenInvoiceLink(self.billing_uow(), self.documents, self.clock)
+
+    def get_billing_summary(self) -> GetBillingSummary:
+        return GetBillingSummary(self.billing_uow())
 
     # Use cases: customers
     def list_customers(self) -> ListCustomers:
@@ -439,6 +718,15 @@ class Container(
 
     def image_processor(self) -> ImageProcessor:
         return PillowImageProcessor()
+
+    def catalog_sync_queue(self) -> CatalogSyncQueue:
+        return ArqCatalogSyncQueue(self.arq)
+
+    def meta_catalog_access(self) -> MetaCatalogAccessPort:
+        return ShopsMetaCatalogs(ResolveShopCatalog(self.shops_uow(), self.cipher))
+
+    def meta_catalog(self) -> MetaCatalogPort:
+        return GraphMetaCatalog(self.graph())
 
     def meta_events(self) -> EventQueue:
         return ArqEventQueue(self.arq)
@@ -574,7 +862,29 @@ class Container(
 
     # Use cases: catalog
     def create_product(self) -> CreateProduct:
-        return CreateProduct(self.catalog_uow(), self.product_images)
+        return CreateProduct(self.catalog_uow(), self.product_images, self.clock)
+
+    def update_product(self) -> UpdateProduct:
+        return UpdateProduct(self.catalog_uow(), self.product_images, self.clock)
+
+    def request_catalog_sync(self) -> RequestCatalogSync:
+        return RequestCatalogSync(self.catalog_sync_queue())
+
+    def request_catalog_resync(self) -> RequestCatalogResync:
+        return RequestCatalogResync(self.catalog_uow(), self.catalog_sync_queue(), self.clock)
+
+    def sync_catalog_to_meta(self) -> SyncCatalogToMeta:
+        return SyncCatalogToMeta(
+            self.catalog_uow(),
+            self.meta_catalog_access(),
+            self.meta_catalog(),
+            self.product_images,
+            self.clock,
+            link_base_url=self.settings.meta_catalog_link_base_url,
+        )
+
+    def retry_catalog_sync(self) -> RetryCatalogSync:
+        return RetryCatalogSync(self.catalog_uow(), self.catalog_sync_queue(), self.clock)
 
     def list_products(self) -> ListProducts:
         return ListProducts(self.catalog_uow(), self.product_images)
@@ -600,7 +910,11 @@ class Container(
 
     def process_photo(self) -> ProcessPhoto:
         return ProcessPhoto(
-            self.catalog_uow(), self.uploads, self.product_images, self.image_processor()
+            self.catalog_uow(),
+            self.uploads,
+            self.product_images,
+            self.image_processor(),
+            self.clock,
         )
 
     # Use cases: messaging

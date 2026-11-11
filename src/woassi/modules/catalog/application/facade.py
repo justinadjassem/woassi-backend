@@ -2,6 +2,11 @@
 
 from typing import Protocol
 
+from woassi.modules.catalog.application.use_cases.meta_sync import (
+    RequestCatalogResync,
+    RetryCatalogSync,
+    SyncCatalogToMeta,
+)
 from woassi.modules.catalog.application.use_cases.photos import (
     ConfirmPhoto,
     ProcessPhoto,
@@ -11,6 +16,7 @@ from woassi.modules.catalog.application.use_cases.products import (
     CreateProduct,
     GetProduct,
     ListProducts,
+    UpdateProduct,
 )
 
 
@@ -26,6 +32,14 @@ class CatalogUseCases(Protocol):
     def list_products(self) -> ListProducts: ...
 
     def get_product(self) -> GetProduct: ...
+
+    def update_product(self) -> UpdateProduct: ...
+
+    def request_catalog_resync(self) -> RequestCatalogResync: ...
+
+    def sync_catalog_to_meta(self) -> SyncCatalogToMeta: ...
+
+    def retry_catalog_sync(self) -> RetryCatalogSync: ...
 
     def request_photo_upload(self) -> RequestPhotoUpload: ...
 

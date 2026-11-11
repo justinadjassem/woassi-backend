@@ -1,9 +1,12 @@
-"""Messaging module seen from `orders`: sending WhatsApp notifications."""
+"""Messaging module seen from `orders`: sending WhatsApp notifications, and the templates
+every shop needs (orders, payments and billing).
+"""
 
 from uuid import UUID
 
 import structlog
 
+from woassi.modules.billing.application.texts import TEMPLATES as BILLING_TEMPLATES
 from woassi.modules.messaging.application.use_cases.sending import SendWhatsAppMessage
 from woassi.modules.messaging.domain.content import (
     ButtonsMessage,
@@ -22,7 +25,8 @@ from woassi.modules.orders.application.ports import (
     Template,
     Text,
 )
-from woassi.modules.orders.application.texts import TEMPLATES
+from woassi.modules.orders.application.texts import TEMPLATES as ORDER_TEMPLATES
+from woassi.modules.payments.application.texts import TEMPLATES as PAYMENT_TEMPLATES
 from woassi.shared.domain.errors import DomainError
 from woassi.shared.domain.values import PhoneNumber
 
@@ -30,7 +34,7 @@ log = structlog.get_logger()
 
 
 def template_definitions() -> list[TemplateDefinition]:
-    """The templates every shop needs, as the orders module wrote them."""
+    """The templates every shop needs, as the orders, payments and billing modules wrote them."""
     return [
         TemplateDefinition(
             name=template.name,
@@ -39,7 +43,15 @@ def template_definitions() -> list[TemplateDefinition]:
             examples=template.examples,
             quick_replies=template.buttons,
         )
-        for template in TEMPLATES
+        for template in (*ORDER_TEMPLATES, *PAYMENT_TEMPLATES)
+    ] + [
+        TemplateDefinition(
+            name=template.name,
+            language=template.language,
+            body=template.body,
+            examples=template.examples,
+        )
+        for template in BILLING_TEMPLATES
     ]
 
 

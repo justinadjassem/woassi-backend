@@ -58,7 +58,8 @@ def customer_update(order: Order, language: str) -> Notification | None:
         case OrderStatus.AWAITING_MERCHANT:
             return Text(text(language, "pending", **values))
         case OrderStatus.CONFIRMED:
-            return Text(text(language, "confirmed", **values))
+            # The order summary, not an invoice: that comes once the payment is validated.
+            return Text(text(language, "confirmed", items=summary(order.available_lines), **values))
         case OrderStatus.AWAITING_CUSTOMER:
             body = text(
                 language,

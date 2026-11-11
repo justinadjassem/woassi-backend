@@ -3,6 +3,7 @@
 https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/send-messages
 https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/interactive-reply-buttons-messages.md
 https://developers.facebook.com/documentation/business-messaging/whatsapp/templates/utility-templates/utility-templates.md
+https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/document-messages
 """
 
 import re
@@ -18,6 +19,8 @@ MAX_BUTTONS = 3
 MAX_BUTTON_TITLE = 20
 MAX_BUTTON_ID = 256
 MAX_FOOTER = 60
+MAX_CAPTION = 1024
+MAX_FILENAME = 240
 TEMPLATE_NAME = re.compile(r"[a-z0-9_]{1,512}")
 LANGUAGE = re.compile(r"[a-z]{2,3}(_[A-Z]{2})?")
 
@@ -116,4 +119,24 @@ class TemplateMessage:
             raise InvalidMessage("A template language looks like fr or en_US.")
 
 
-type MessageContent = TextMessage | ButtonsMessage | TemplateMessage
+@dataclass(frozen=True, slots=True)
+class DocumentMessage:
+    """A file Meta downloads from `link` when sending (e.g. a presigned PDF URL), only within
+    the 24-hour window. `filename` keeps its extension: WhatsApp picks the icon from it.
+    """
+
+    link: str = field(repr=False)
+    filename: str
+    caption: str | None = field(default=None, repr=False)
+
+    def __post_init__(self) -> None:
+        if not self.link.startswith(("https://", "http://")):
+            raise InvalidMessage("A document link must be an http(s) URL.")
+        _length(self.filename, MAX_FILENAME, "A file name")
+        if "." not in self.filename:
+            raise InvalidMessage("A file name needs its extension, e.g. invoice.pdf.")
+        if self.caption is not None:
+            _length(self.caption, MAX_CAPTION, "A caption")
+
+
+type MessageContent = TextMessage | ButtonsMessage | TemplateMessage | DocumentMessage

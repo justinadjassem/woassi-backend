@@ -96,15 +96,29 @@ class Operator(StrEnum):
     MOOV = "MOOV"
 
 
+class TaxRegime(StrEnum):
+    """Togolese tax regime. TPU: single professional tax, individuals up to 60 M XOF of
+    turnover, which covers VAT. REAL: the real regime, above 60 M XOF.
+    """
+
+    TPU = "TPU"
+    REAL = "REAL"
+
+
 @dataclass(frozen=True, slots=True)
 class InvoiceDetails:
-    """Legal details printed on the shop's invoices."""
+    """Legal details printed on the shop's invoices. All optional: a small informal merchant
+    has no NIF, and still gets invoices.
+    """
 
     company_name: str = ""
     tax_id: str = ""  # NIF
     trade_register: str = ""  # RCCM
-    address: str = ""
+    address: str = ""  # legal address; the shop's address is printed when empty
     phone: str = ""
+    tax_regime: TaxRegime | None = None
+    # Only a VAT-registered seller charges VAT (18 %); the others print "NE FACTURE PAS LA TVA".
+    vat_registered: bool = False
 
 
 @dataclass(frozen=True, slots=True)

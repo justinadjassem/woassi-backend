@@ -2,7 +2,8 @@
 
 Customer messages are free-form: the customer has just written, so the 24-hour window is open.
 The merchant gets the `order_validation` template, as their number is usually outside it.
-Template parameters may not contain line breaks, hence the one-line summaries.
+Template parameters may not contain line breaks, hence the one-line summaries. Being at most
+`MAX_PARAMETER` long, they also keep every free-form text far below WhatsApp's 4096 characters.
 """
 
 from collections.abc import Sequence
@@ -63,7 +64,10 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Merci ! Votre commande n°{number} ({total}) est bien reçue. "
             "Le commerçant va la confirmer."
         ),
-        "confirmed": "Votre commande n°{number} est confirmée. Total : {total}.",
+        "confirmed": (
+            "Votre commande n°{number} est confirmée : {items}. Total : {total}.\n"
+            "Vous allez recevoir les instructions de paiement."
+        ),
         "out_of_stock": "Désolé, les articles de votre commande ne sont plus disponibles.",
         "offer": (
             "Certains articles ne sont plus disponibles : {missing}. "
@@ -81,7 +85,10 @@ _TEXTS: dict[str, dict[str, str]] = {
             "Thank you! Your order #{number} ({total}) has been received. "
             "The merchant will confirm it."
         ),
-        "confirmed": "Your order #{number} is confirmed. Total: {total}.",
+        "confirmed": (
+            "Your order #{number} is confirmed: {items}. Total: {total}.\n"
+            "You will receive the payment instructions shortly."
+        ),
         "out_of_stock": "Sorry, the items of your order are no longer available.",
         "offer": (
             "Some items are no longer available: {missing}. "
@@ -104,10 +111,23 @@ def text(language: str, key: str, **values: object) -> str:
 
 
 def summary(lines: Sequence[OrderLine], *, requested: bool = False) -> str:
-    """'2 x Pagne, 1 x Sac' on one line, cut to what a template parameter accepts."""
-    parts = [f"{line.requested if requested else line.quantity} x {line.name}" for line in lines]
-    joined = ", ".join(parts).replace("\n", " ")
-    return joined if len(joined) <= MAX_PARAMETER else joined[: MAX_PARAMETER - 1] + "…"
+    """'2 x Pagne, 1 x Sac' on one line, cut to what a template parameter accepts.
+
+    A long cart keeps whole items and ends with how many were left out: `…, … (+3)`.
+    """
+    parts = [
+        f"{line.requested if requested else line.quantity} x {line.name}".replace("\n", " ")
+        for line in lines
+    ]
+    joined = ", ".join(parts)
+    if len(joined) <= MAX_PARAMETER:
+        return joined
+    for kept in range(len(parts) - 1, 0, -1):
+        cut = f"{', '.join(parts[:kept])}, … (+{len(parts) - kept})"
+        if len(cut) <= MAX_PARAMETER:
+            return cut
+    left_out = len(parts) - 1
+    return parts[0][: MAX_PARAMETER - 12] + "…" + (f" (+{left_out})" if left_out else "")
 
 
 def amount(value: Amount) -> str:

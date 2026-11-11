@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     meta_app_id: str = Field(min_length=1)
     meta_config_id: str = ""  # used by the dashboard's Embedded Signup, not by this API
     meta_graph_version: str = "v27.0"
+    # Meta requires a `link` per catalog item, on the business's own domain. Products link to
+    # `{base}/shops/{shop_id}/products/{product_id}`.
+    meta_catalog_link_base_url: str = "https://woassi.com"
 
     # min_length=32: HS256 is only as strong as this secret.
     jwt_secret: str = Field(min_length=32)
@@ -47,6 +50,15 @@ class Settings(BaseSettings):
 
     sentry_dsn: str | None = None
     cors_origins: Annotated[list[str], NoDecode] = []
+
+    # Public https URL of this API, e.g. https://api.woassi.com: KPrimePay sends its webhooks
+    # there. Empty (as in local development): no webhooks, payments are only seen by polling.
+    public_base_url: str = ""
+    # Where KPrimePay sends the customer after paying. Default: {PUBLIC_BASE_URL}/payments/return.
+    payment_return_url: str = ""
+    kprimepay_base_url: str = "https://api.kprimepay.com/v2"
+    kprimepay_connect_timeout_s: float = 5.0
+    kprimepay_read_timeout_s: float = 15.0
 
     max_photos_per_product: int = 5
     photo_max_size_bytes: int = 8 * 1024 * 1024
@@ -65,6 +77,14 @@ class Settings(BaseSettings):
         if not self.encryption_keys:
             raise ValueError("Set WOASSI_ENCRYPTION_KEY or WOASSI_ENCRYPTION_KEYS.")
         return self
+
+    @property
+    def payment_return_url_or_default(self) -> str:
+        """`payment_return_url`, else the API's own return page; KPrimePay requires one."""
+        if self.payment_return_url:
+            return self.payment_return_url
+        base = self.public_base_url.rstrip("/") or "http://localhost:8000"
+        return f"{base}/payments/return"
 
     @property
     def encryption_keys(self) -> list[str]:

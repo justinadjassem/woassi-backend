@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from woassi.modules.catalog.domain.errors import RetailerIdAlreadyUsed
-from woassi.modules.catalog.domain.events import ProductCreated
+from woassi.modules.catalog.domain.events import ProductCreated, ProductMetaSyncRequested
 from woassi.modules.catalog.domain.product import Product
 from woassi.modules.catalog.infrastructure.models import ProductModel
 from woassi.modules.catalog.infrastructure.uow import SqlAlchemyCatalogUoW
@@ -33,6 +33,7 @@ class RecordingBus:
 
 def product(shop_id: object = None) -> Product:
     return Product.create(
+        now=NOW,
         shop_id=shop_id or uuid4(),  # type: ignore[arg-type]
         name="Pagne",
         price=Amount(5000),
@@ -56,7 +57,7 @@ async def test_events_reach_the_bus_once_the_row_is_visible(
         await uow.products.add(product())
         await uow.commit()
 
-    assert visible == [1]
+    assert visible == [1, 1]  # ProductCreated, then ProductMetaSyncRequested
 
 
 async def test_rollback_publishes_nothing_and_saves_nothing(
@@ -82,9 +83,10 @@ async def test_commit_publishes_the_entity_events(
         await uow.products.add(created)
         await uow.commit()
 
-    [event] = bus.events
+    event, sync = bus.events
     assert isinstance(event, ProductCreated)
     assert event.product_id == created.id
+    assert isinstance(sync, ProductMetaSyncRequested)
 
 
 async def test_a_refused_insert_publishes_nothing(

@@ -22,3 +22,11 @@ class OrderClosed(DomainEvent):
     order_id: UUID
     shop_id: UUID
     status: str
+
+
+@dataclass(frozen=True, kw_only=True)
+class OrderPaid(DomainEvent):
+    """The order is paid in full: it moved from CONFIRMED to PAID."""
+
+    order_id: UUID
+    shop_id: UUID

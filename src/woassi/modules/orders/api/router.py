@@ -68,6 +68,7 @@ class OrderResponse(BaseModel):
     closed_at: datetime | None
     closing_reason: ClosingReason | None
     decided_by: DecidedBy | None
+    paid_at: datetime | None
 
     @classmethod
     def from_order(cls, order: Order) -> "OrderResponse":
@@ -85,6 +86,7 @@ class OrderResponse(BaseModel):
             closed_at=order.closed_at,
             closing_reason=order.closing_reason,
             decided_by=order.decided_by,
+            paid_at=order.paid_at,
         )
 
 

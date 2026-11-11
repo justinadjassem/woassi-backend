@@ -18,6 +18,7 @@ from woassi.modules.shops.domain.shop import (
     Operator,
     PaymentMode,
     ShopStatus,
+    TaxRegime,
     ValidationMode,
     WhatsAppStatus,
 )
@@ -79,8 +80,12 @@ class InvoiceDetailsBody(BaseModel):
     company_name: str = Field(default="", max_length=200)
     tax_id: str = Field(default="", max_length=50, description="NIF")
     trade_register: str = Field(default="", max_length=50, description="RCCM")
-    address: str = Field(default="", max_length=300)
+    address: str = Field(default="", max_length=300, description="Legal address")
     phone: str = Field(default="", max_length=30)
+    tax_regime: TaxRegime | None = Field(default=None, description="TPU or REAL")
+    vat_registered: bool = Field(
+        default=False, description="Only a VAT-registered shop charges 18 % VAT on invoices"
+    )
 
 
 class SettingsBody(BaseModel):
@@ -115,6 +120,8 @@ class SettingsBody(BaseModel):
                 trade_register=details.trade_register,
                 address=details.address,
                 phone=details.phone,
+                tax_regime=details.tax_regime,
+                vat_registered=details.vat_registered,
             ),
             invoice_prefix=view.invoice_prefix,
             language=view.language,

@@ -3,10 +3,11 @@ from uuid import UUID, uuid4
 import pytest
 from fastapi.testclient import TestClient
 
-from tests.fakes import FakeJobQueue, FakeStorage, FakeUoW
+from tests.fakes import NOW, FakeCatalogSyncQueue, FakeJobQueue, FakeStorage, FakeUoW
 from woassi.config import Settings
 from woassi.main import create_app
 from woassi.modules.catalog.api.deps import get_catalog
+from woassi.modules.catalog.application.use_cases.meta_sync import RequestCatalogResync
 from woassi.modules.catalog.application.use_cases.photos import (
     ConfirmPhoto,
     RequestPhotoUpload,
@@ -15,8 +16,10 @@ from woassi.modules.catalog.application.use_cases.products import (
     CreateProduct,
     GetProduct,
     ListProducts,
+    UpdateProduct,
 )
 from woassi.shared.api.deps import get_authorized_shop
+from woassi.shared.infrastructure.clock import FrozenClock
 
 
 def allow_shop(shop_id: UUID) -> UUID:
@@ -29,15 +32,23 @@ class FakeCatalog:
         self.uploads = FakeStorage()
         self.images = FakeStorage("http://images")
         self.jobs = FakeJobQueue()
+        self.sync_queue = FakeCatalogSyncQueue()
+        self.clock = FrozenClock(NOW)
 
     def create_product(self) -> CreateProduct:
-        return CreateProduct(self.uow, self.images)
+        return CreateProduct(self.uow, self.images, self.clock)
 
     def list_products(self) -> ListProducts:
         return ListProducts(self.uow, self.images)
 
     def get_product(self) -> GetProduct:
         return GetProduct(self.uow, self.images)
+
+    def update_product(self) -> UpdateProduct:
+        return UpdateProduct(self.uow, self.images, self.clock)
+
+    def request_catalog_resync(self) -> RequestCatalogResync:
+        return RequestCatalogResync(self.uow, self.sync_queue, self.clock)
 
     def request_photo_upload(self) -> RequestPhotoUpload:
         return RequestPhotoUpload(self.uow, self.uploads)
@@ -133,3 +144,50 @@ def test_too_many_photos_is_a_conflict(client: TestClient) -> None:
     response = client.post(f"{base}/{product_id}/photos/upload-url", json=body)
     assert response.status_code == 409
     assert response.json()["code"] == "catalog.too_many_photos"
+
+
+def test_product_exposes_its_meta_sync_state(client: TestClient) -> None:
+    created = client.post(f"/shops/{uuid4()}/products", json=PRODUCT).json()
+    assert created["meta_sync"] == {
+        "status": "PENDING",
+        "synced_at": None,
+        "error_code": None,
+        "next_attempt_at": "2026-01-01T09:05:00Z",
+    }
+
+
+def test_update_product(client: TestClient, catalog: FakeCatalog) -> None:
+    base = f"/shops/{uuid4()}/products"
+    product_id = client.post(base, json=PRODUCT).json()["id"]
+    catalog.uow.events.clear()
+
+    response = client.patch(f"{base}/{product_id}", json={"price": 6000, "active": False})
+
+    assert response.status_code == 200
+    assert (response.json()["price"], response.json()["active"]) == (6000, False)
+    assert response.json()["stock"] == 3
+    assert len(catalog.uow.events) == 1
+
+
+def test_update_unknown_product_is_404(client: TestClient) -> None:
+    response = client.patch(f"/shops/{uuid4()}/products/{uuid4()}", json={"price": 1})
+    assert response.status_code == 404
+
+
+@pytest.mark.parametrize("body", [{"name": ""}, {"stock": -1}, {"price": -5}])
+def test_update_validation(client: TestClient, body: dict[str, object]) -> None:
+    base = f"/shops/{uuid4()}/products"
+    product_id = client.post(base, json=PRODUCT).json()["id"]
+    assert client.patch(f"{base}/{product_id}", json=body).status_code == 422
+
+
+def test_force_resync(client: TestClient, catalog: FakeCatalog) -> None:
+    shop_id = uuid4()
+    client.post(f"/shops/{shop_id}/products", json=PRODUCT)
+    client.post(f"/shops/{shop_id}/products", json={**PRODUCT, "retailer_id": "SKU-2"})
+
+    response = client.post(f"/shops/{shop_id}/products/sync")
+
+    assert response.status_code == 202
+    assert response.json() == {"pending": 2}
+    assert catalog.sync_queue.shops == [shop_id]

@@ -18,7 +18,7 @@ from PIL import Image
 from tests.fakes import FakeAuditLog, FakeIdempotencyStore, FakeShopsUoW, FakeStorage
 from woassi.config import Settings
 from woassi.integration.images import CatalogLogoProcessor
-from woassi.integration.shops import ShopsConnections, ShopsOwnership
+from woassi.integration.shops import ShopsConnections, ShopsMetaCatalogs, ShopsOwnership
 from woassi.main import create_app
 from woassi.modules.catalog.infrastructure.image_processor import PillowImageProcessor
 from woassi.modules.shops.api.deps import get_shops
@@ -36,6 +36,7 @@ from woassi.modules.shops.application.use_cases.shops import (
     GetShop,
     ListShops,
     ResolveShopByPhoneNumber,
+    ResolveShopCatalog,
     ResolveShopConnection,
     UpdateShop,
 )
@@ -157,6 +158,9 @@ class Stack:
             ResolveShopByPhoneNumber(self.uow(), self.cipher),
             ResolveShopConnection(self.uow(), self.cipher),
         )
+
+    def catalogs(self) -> ShopsMetaCatalogs:
+        return ShopsMetaCatalogs(ResolveShopCatalog(self.uow(), self.cipher))
 
 
 @pytest.fixture
@@ -376,6 +380,19 @@ def test_replace_settings(client: TestClient, shop_id: str) -> None:
     assert saved["notification_number"] == "+22890123456"
     assert saved["payment_modes"] == ["CASH", "MIXX", "MOOV"]
     assert saved["invoice_details"]["trade_register"] == "RCCM"
+
+
+def test_tax_settings(client: TestClient, shop_id: str) -> None:
+    defaults = client.get(f"/shops/{shop_id}/settings").json()["invoice_details"]
+    assert (defaults["tax_regime"], defaults["vat_registered"]) == (None, False)
+
+    details = {"tax_id": "1000123456", "tax_regime": "REAL", "vat_registered": True}
+    body = {"invoice_details": details}
+    assert client.put(f"/shops/{shop_id}/settings", json=body).status_code == 200
+    saved = client.get(f"/shops/{shop_id}/settings").json()["invoice_details"]
+    assert (saved["tax_regime"], saved["vat_registered"]) == ("REAL", True)
+    bad = {"invoice_details": {"tax_regime": "FLAT"}}
+    assert client.put(f"/shops/{shop_id}/settings", json=bad).status_code == 422
 
 
 def test_order_settings(client: TestClient, shop_id: str) -> None:
@@ -798,6 +815,29 @@ async def test_lookup_gives_the_shop_and_the_decrypted_token(
     assert found.access_token == TOKEN
     assert await stack.lookup().by_shop_id(UUID(shop_id)) == found
     assert TOKEN not in repr(found)
+
+
+async def test_meta_catalog_of_a_connected_shop(
+    client: TestClient, stack: Stack, shop_id: str, meta: respx.MockRouter
+) -> None:
+    assert await stack.catalogs().for_shop(UUID(shop_id)) is None
+    connect(client, shop_id)
+
+    access = await stack.catalogs().for_shop(UUID(shop_id))
+
+    assert access is not None
+    assert (access.catalog_id, access.access_token) == ("3003", TOKEN)
+    assert access.brand == stack.database[UUID(shop_id)].name
+    assert TOKEN not in repr(access)
+
+
+async def test_no_meta_catalog_without_a_linked_catalog(
+    client: TestClient, stack: Stack, shop_id: str, meta: respx.MockRouter
+) -> None:
+    meta.get(f"{GRAPH}/{WABA}/product_catalogs").respond(200, json={"data": []})
+    connect(client, shop_id)
+    assert stack.database[UUID(shop_id)].status is ShopStatus.ACTIVE
+    assert await stack.catalogs().for_shop(UUID(shop_id)) is None
 
 
 async def test_lookup_unknown_number(stack: Stack) -> None:

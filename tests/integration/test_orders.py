@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from tests.fakes import NOW
 from tests.orders_fakes import FakeShops, RecordingMessaging, profile
 from woassi.integration.catalog import CatalogStock
 from woassi.integration.customers import CustomerContacts
@@ -51,7 +52,10 @@ class Real:
         return SqlAlchemyCustomersUoW(self.sessions, NullBus(), self.clock)
 
     def stock(self) -> CatalogStock:
-        return CatalogStock(ReserveStock(self.catalog_uow()), ReleaseStock(self.catalog_uow()))
+        return CatalogStock(
+            ReserveStock(self.catalog_uow(), self.clock),
+            ReleaseStock(self.catalog_uow(), self.clock),
+        )
 
     def flow[F: OrderFlow](self, use_case: type[F]) -> F:
         return use_case(
@@ -65,6 +69,7 @@ class Real:
 
     async def product(self, stock: int, retailer_id: str = "SKU-1") -> Product:
         product = Product.create(
+            now=NOW,
             shop_id=self.shop_id,
             name="Pagne",
             price=Amount(5000),
@@ -106,7 +111,7 @@ def real(sessions: async_sessionmaker[AsyncSession]) -> Real:
 async def test_the_last_item_is_sold_once(real: Real) -> None:
     """Ten customers want the last pagne at the same moment."""
     product = await real.product(stock=1)
-    reserve = [ReserveStock(real.catalog_uow()) for _ in range(10)]
+    reserve = [ReserveStock(real.catalog_uow(), real.clock) for _ in range(10)]
 
     results = await asyncio.gather(
         *(use_case.execute(shop_id=real.shop_id, requested={"SKU-1": 1}) for use_case in reserve)
@@ -120,7 +125,9 @@ async def test_concurrent_reservations_never_go_below_zero(real: Real) -> None:
     product = await real.product(stock=7)
     results = await asyncio.gather(
         *(
-            ReserveStock(real.catalog_uow()).execute(shop_id=real.shop_id, requested={"SKU-1": 2})
+            ReserveStock(real.catalog_uow(), real.clock).execute(
+                shop_id=real.shop_id, requested={"SKU-1": 2}
+            )
             for _ in range(6)
         )
     )

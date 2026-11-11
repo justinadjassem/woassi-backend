@@ -64,7 +64,12 @@ async def test_automatic_mode_confirms_at_once() -> None:
     assert order.status is OrderStatus.CONFIRMED
     assert stack.messaging.to_merchant() == []
     [(text, _)] = stack.messaging.to_customer()
-    assert isinstance(text, Text) and "confirmée" in text.body
+    assert isinstance(text, Text)
+    assert text.body == (
+        "Votre commande n°1 est confirmée : 2 x Pagne wax. Total : 10 000 FCFA.\n"
+        "Vous allez recevoir les instructions de paiement."
+    )
+    assert "facture" not in text.body.lower()
     assert [type(e) for e in stack.events] == [OrderConfirmed]
 
 
@@ -142,7 +147,9 @@ async def test_merchant_accepts(stack: OrdersStack) -> None:
     assert stack.order(order).status is OrderStatus.CONFIRMED
     assert stack.catalog.stock("SKU-PAGNE") == 8
     text = stack.messaging.to_customer()[-1][0]
-    assert isinstance(text, Text) and "confirmée" in text.body
+    assert isinstance(text, Text)
+    assert "confirmée : 2 x Pagne wax. Total : 10 000 FCFA." in text.body
+    assert text.body.endswith("Vous allez recevoir les instructions de paiement.")
     [entry] = stack.audit_log.entries
     assert entry.action == "order.validated"
     assert entry.details["channel"] == "whatsapp"
@@ -219,6 +226,50 @@ async def test_customer_takes_the_rest(stack: OrdersStack) -> None:
     assert updated.status is OrderStatus.AWAITING_MERCHANT
     assert [(line.name, line.quantity) for line in updated.lines] == [("Pagne wax", 2), ("Sac", 1)]
     assert len(stack.messaging.to_merchant()) == 1
+
+    accept, _, message_id = merchant_buttons(stack)
+    assert await stack.reply(accept, message_id)
+    confirmation = stack.messaging.to_customer()[-1][0]
+    assert isinstance(confirmation, Text)
+    assert "confirmée : 2 x Pagne wax, 1 x Sac. Total : 22 500 FCFA." in confirmation.body
+    assert "3 x Sac" not in confirmation.body
+
+
+async def test_customer_takes_the_rest_in_automatic_mode() -> None:
+    stack = OrdersStack(mode=ValidationMode.AUTOMATIC, language="en")
+    stack.catalog.add("SKU-PAGNE", "Pagne wax", 5000, stock=10)
+    stack.catalog.add("SKU-SAC", "Bag", 12500, stock=1)
+    order = await stack.receive(("SKU-PAGNE", 2), ("SKU-SAC", 3))
+    offer, offer_id = stack.messaging.to_customer()[0]
+    assert isinstance(offer, Buttons)
+
+    assert await stack.reply(offer.buttons[0][0], offer_id)
+
+    assert stack.order(order).status is OrderStatus.CONFIRMED
+    confirmation = stack.messaging.to_customer()[-1][0]
+    assert isinstance(confirmation, Text)
+    assert confirmation.body == (
+        "Your order #1 is confirmed: 2 x Pagne wax, 1 x Bag. Total: 22 500 FCFA.\n"
+        "You will receive the payment instructions shortly."
+    )
+    assert "invoice" not in confirmation.body.lower()
+
+
+async def test_a_long_cart_is_cut_in_the_confirmation() -> None:
+    stack = OrdersStack(mode=ValidationMode.AUTOMATIC)
+    skus = [f"SKU-{i}" for i in range(200)]
+    for i, sku in enumerate(skus):
+        stack.catalog.add(sku, f"Pagne wax motif numéro {i} " + "x" * 40, 1000, stock=5)
+
+    await stack.receive(*((sku, 1) for sku in skus))
+
+    [(confirmation, _)] = stack.messaging.to_customer()
+    assert isinstance(confirmation, Text)
+    assert len(confirmation.body) < 1024
+    assert "1 x Pagne wax motif numéro 0 " in confirmation.body
+    assert "numéro 199" not in confirmation.body
+    kept = confirmation.body.count("1 x Pagne wax")
+    assert f", … (+{200 - kept}). Total : 200 000 FCFA." in confirmation.body
 
 
 async def test_the_offer_buttons_only_answer_the_offer(stack: OrdersStack) -> None:
@@ -326,3 +377,44 @@ async def test_customer_messages_go_to_the_customer(stack: OrdersStack) -> None:
     assert to == CUSTOMER
     assert stack.messaging.sent[1][0].phone == MERCHANT_PHONE
     assert isinstance(stack.messaging.sent[1][1], Template)
+
+
+# Payment
+
+
+async def test_a_payment_marks_the_order_paid() -> None:
+    from tests.orders_fakes import FakeOrdersUoW
+    from woassi.modules.orders.application.use_cases.orders import MarkOrderPaid
+    from woassi.modules.orders.domain.events import OrderPaid
+
+    stack = OrdersStack(mode=ValidationMode.AUTOMATIC)
+    stack.catalog.add("SKU-PAGNE", "Pagne wax", 5000, stock=10)
+    order = await stack.receive(("SKU-PAGNE", 2))
+    mark_paid = MarkOrderPaid(FakeOrdersUoW(stack), stack.clock)
+
+    assert await mark_paid.execute(shop_id=stack.shop_id, order_id=order.id)
+    paid = stack.order(order)
+    assert paid.status is OrderStatus.PAID and paid.paid_at == stack.clock.now()
+    assert isinstance(stack.events[-1], OrderPaid)
+    # Replayed event: nothing changes.
+    assert not await mark_paid.execute(shop_id=stack.shop_id, order_id=order.id)
+    # A paid order keeps its stock and can no longer be closed.
+    assert stack.catalog.stock("SKU-PAGNE") == 8
+    with pytest.raises(OrderNotOpen):
+        paid.refuse(stack.clock.now())
+    with pytest.raises(OrderNotOpen):
+        paid.expire(stack.clock.now())
+    assert paid.due_action(stack.clock.now() + timedelta(days=30)) is None
+
+
+async def test_only_a_confirmed_order_can_be_paid(stack: OrdersStack) -> None:
+    from tests.orders_fakes import FakeOrdersUoW
+    from woassi.modules.orders.application.use_cases.orders import MarkOrderPaid
+
+    order = await stack.receive(("SKU-PAGNE", 1))
+    assert order.status is OrderStatus.AWAITING_MERCHANT
+    mark_paid = MarkOrderPaid(FakeOrdersUoW(stack), stack.clock)
+    assert not await mark_paid.execute(shop_id=stack.shop_id, order_id=order.id)
+    assert stack.order(order).status is OrderStatus.AWAITING_MERCHANT
+    with pytest.raises(OrderNotOpen):
+        order.mark_paid(stack.clock.now())

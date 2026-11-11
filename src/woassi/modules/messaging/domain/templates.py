@@ -36,6 +36,9 @@ class TemplateDefinition:
             raise InvalidMessage("Invalid template name or language.")
         if not 1 <= len(self.body) <= MAX_BODY:
             raise InvalidMessage(f"A template body takes 1 to {MAX_BODY} characters.")
+        # Meta rejects a body that starts or ends with a parameter, trailing punctuation aside.
+        if self.body.startswith("{{") or self.body.rstrip(" .!?:;,").endswith("}}"):
+            raise InvalidMessage("A template body cannot start or end with a parameter.")
         if set(PARAMETER.findall(self.body)) != set(self.examples):
             raise InvalidMessage("Every template parameter needs an example, and only those.")
         if len(self.quick_replies) > MAX_QUICK_REPLIES or any(

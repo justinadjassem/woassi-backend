@@ -70,6 +70,7 @@ def _to_domain(model: OrderModel) -> Order:
         closed_at=model.closed_at,
         closing_reason=ClosingReason(model.closing_reason) if model.closing_reason else None,
         decided_by=DecidedBy(model.decided_by) if model.decided_by else None,
+        paid_at=model.paid_at,
     )
 
 
@@ -100,6 +101,7 @@ def _copy(order: Order, model: OrderModel) -> OrderModel:
     model.closed_at = order.closed_at
     model.closing_reason = order.closing_reason.value if order.closing_reason else None
     model.decided_by = order.decided_by.value if order.decided_by else None
+    model.paid_at = order.paid_at
     return model
 
 

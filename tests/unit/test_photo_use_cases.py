@@ -2,7 +2,7 @@ from uuid import uuid4
 
 import pytest
 
-from tests.fakes import FakeImageProcessor, FakeJobQueue, FakeStorage, FakeUoW
+from tests.fakes import NOW, FakeImageProcessor, FakeJobQueue, FakeStorage, FakeUoW
 from woassi.modules.catalog.application.use_cases.photos import (
     ConfirmPhoto,
     ProcessPhoto,
@@ -17,6 +17,7 @@ from woassi.modules.catalog.domain.errors import (
 )
 from woassi.modules.catalog.domain.product import PhotoStatus, Product, ProductPhoto
 from woassi.shared.domain.values import Amount
+from woassi.shared.infrastructure.clock import FrozenClock
 
 EIGHT_MB = 8 * 1024 * 1024
 
@@ -39,7 +40,7 @@ def images() -> FakeStorage:
 @pytest.fixture
 def product(uow: FakeUoW) -> Product:
     product = Product.create(
-        shop_id=uuid4(), name="Pagne", price=Amount(5000), stock=1, retailer_id="SKU-1"
+        now=NOW, shop_id=uuid4(), name="Pagne", price=Amount(5000), stock=1, retailer_id="SKU-1"
     )
     uow.repository.products[product.id] = product
     return product
@@ -181,7 +182,9 @@ async def test_process_writes_variants_and_deletes_original(
 ) -> None:
     uploads.objects[photo.original_key] = b"image"
 
-    await ProcessPhoto(uow, uploads, images, FakeImageProcessor()).execute(photo.id)
+    await ProcessPhoto(uow, uploads, images, FakeImageProcessor(), FrozenClock(NOW)).execute(
+        photo.id
+    )
 
     base = f"shops/{product.shop_id}/products/{product.id}/{photo.id}"
     assert images.objects == {f"{base}_400.webp": b"webp-400", f"{base}_1024.webp": b"webp-1024"}
@@ -200,7 +203,9 @@ async def test_process_rejects_unreadable_image(
 ) -> None:
     uploads.objects[photo.original_key] = b"not an image"
 
-    await ProcessPhoto(uow, uploads, images, FakeImageProcessor(unreadable=True)).execute(photo.id)
+    await ProcessPhoto(
+        uow, uploads, images, FakeImageProcessor(unreadable=True), FrozenClock(NOW)
+    ).execute(photo.id)
 
     assert uow.repository.products[product.id].photo(photo.id).status is PhotoStatus.REJECTED
     assert images.objects == {}
@@ -214,7 +219,9 @@ async def test_process_without_original_rejects(
     product: Product,
     photo: ProductPhoto,
 ) -> None:
-    await ProcessPhoto(uow, uploads, images, FakeImageProcessor()).execute(photo.id)
+    await ProcessPhoto(uow, uploads, images, FakeImageProcessor(), FrozenClock(NOW)).execute(
+        photo.id
+    )
     assert uow.repository.products[product.id].photo(photo.id).status is PhotoStatus.REJECTED
 
 
@@ -225,7 +232,9 @@ async def test_process_is_noop_on_ready_photo(
     photo: ProductPhoto,
 ) -> None:
     photo.mark_ready({400: "x"})
-    await ProcessPhoto(uow, uploads, images, FakeImageProcessor()).execute(photo.id)
+    await ProcessPhoto(uow, uploads, images, FakeImageProcessor(), FrozenClock(NOW)).execute(
+        photo.id
+    )
     assert images.objects == {}
 
 
@@ -233,4 +242,6 @@ async def test_process_unknown_photo_fails(
     uow: FakeUoW, uploads: FakeStorage, images: FakeStorage
 ) -> None:
     with pytest.raises(PhotoNotFound):
-        await ProcessPhoto(uow, uploads, images, FakeImageProcessor()).execute(uuid4())
+        await ProcessPhoto(uow, uploads, images, FakeImageProcessor(), FrozenClock(NOW)).execute(
+            uuid4()
+        )

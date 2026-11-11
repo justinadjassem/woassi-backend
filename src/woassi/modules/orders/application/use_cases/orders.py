@@ -338,6 +338,31 @@ class ProcessDueOrders(OrderFlow):
         return 1
 
 
+class MarkOrderPaid:
+    """The payments module validated a payment: CONFIRMED -> PAID. Safe to run twice."""
+
+    def __init__(self, uow: OrdersUnitOfWork, clock: Clock) -> None:
+        self._uow = uow
+        self._clock = clock
+
+    async def execute(self, *, shop_id: UUID, order_id: UUID) -> bool:
+        """True if the order moved to PAID; False if already paid, missing or not confirmed."""
+        async with self._uow as uow:
+            order = await uow.orders.get(shop_id, order_id, lock=True)
+            if order is None or order.status is not OrderStatus.CONFIRMED:
+                if order is None or order.status is not OrderStatus.PAID:
+                    log.warning(
+                        "order_paid_but_not_confirmed",
+                        order_id=str(order_id),
+                        status=order.status.value if order else None,
+                    )
+                return False
+            order.mark_paid(self._clock.now())
+            await uow.orders.save(order)
+            await uow.commit()
+        return True
+
+
 @dataclass(frozen=True, slots=True)
 class OrderPage:
     """One page of orders, and the total number of matching orders."""

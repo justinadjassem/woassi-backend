@@ -1,6 +1,7 @@
 """Sends messages through the Cloud API.
 
 https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/send-messages
+https://developers.facebook.com/documentation/business-messaging/whatsapp/messages/document-messages
 https://developers.facebook.com/documentation/business-messaging/whatsapp/support/error-codes
 https://developers.facebook.com/documentation/business-messaging/whatsapp/throughput/
 """
@@ -12,6 +13,7 @@ from typing import Any
 from woassi.modules.messaging.application.ports import SendError, SendFailure, ShopConnection
 from woassi.modules.messaging.domain.content import (
     ButtonsMessage,
+    DocumentMessage,
     MessageContent,
     Recipient,
     TemplateMessage,
@@ -81,6 +83,11 @@ def _content(content: MessageContent) -> dict[str, Any]:
                     }
                 )
             return {"type": "template", "template": template}
+        case DocumentMessage():
+            document = {"link": content.link, "filename": content.filename}
+            if content.caption:
+                document["caption"] = content.caption
+            return {"type": "document", "document": document}
 
 
 def _failure(status: int, code: int | None) -> SendFailure:

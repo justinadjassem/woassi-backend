@@ -18,6 +18,10 @@ from woassi.modules.customers.application.use_cases.customers import (
 )
 from woassi.modules.messaging.domain.event import InboundMessage
 from woassi.modules.orders.application.use_cases.orders import Cart, ReceiveCart, ReplyToOrder
+from woassi.modules.payments.application.use_cases.conversation import (
+    ReceivePayerNumber,
+    ReplyToPayment,
+)
 from woassi.shared.application.ports import Clock
 from woassi.shared.domain.errors import InvalidData
 from woassi.shared.domain.values import PhoneNumber
@@ -74,20 +78,26 @@ class OrdersInboundHandler:
         change_user_id: ChangeCustomerUserId,
         receive_cart: ReceiveCart,
         reply_to_order: ReplyToOrder,
+        reply_to_payment: ReplyToPayment,
+        receive_payer_number: ReceivePayerNumber,
         clock: Clock,
     ) -> None:
         self._record_contact = record_contact
         self._change_user_id = change_user_id
         self._receive_cart = receive_cart
         self._reply_to_order = reply_to_order
+        self._reply_to_payment = reply_to_payment
+        self._receive_payer_number = receive_payer_number
         self._clock = clock
 
     async def handle(self, shop_id: UUID, message: InboundMessage) -> None:
         """Routes one inbound message.
 
         - `system`: a customer changed number, so their BSUID changed;
-        - a button reply to one of our order messages: handled by `ReplyToOrder`;
-        - anything else: records the customer, and a cart (`order`) becomes an order.
+        - a button reply to one of our order messages: `ReplyToOrder`; to one of our payment
+          messages (`payment:...`): `ReplyToPayment`;
+        - anything else: records the customer; a cart (`order`) becomes an order, and a text
+          may be the Mobile Money number a payment waits for (`ReceivePayerNumber`).
         """
         if message.type == "system":
             await self._system(shop_id, message)
@@ -95,7 +105,10 @@ class OrdersInboundHandler:
 
         payload = _reply_payload(message)
         if payload is not None:
-            handled = await self._reply_to_order.execute(
+            reply = (
+                self._reply_to_payment if payload.startswith("payment:") else self._reply_to_order
+            )
+            handled = await reply.execute(
                 shop_id=shop_id, payload=payload, context_message_id=message.context_message_id
             )
             # False when the button does not answer one of our order messages: then it is handled
@@ -126,6 +139,8 @@ class OrdersInboundHandler:
                     note=note[:1000] if isinstance(note, str) else "",
                 ),
             )
+        elif message.type == "text" and await self._payer_number(shop_id, customer_id, message):
+            return
         else:
             log.info(
                 "inbound_message_not_an_order",
@@ -133,6 +148,17 @@ class OrdersInboundHandler:
                 message_id=message.message_id,
                 type=message.type,
             )
+
+    async def _payer_number(
+        self, shop_id: UUID, customer_id: UUID, message: InboundMessage
+    ) -> bool:
+        """True if the text was the number a payment of this customer waits for."""
+        body = message.payload.get("body")
+        if not isinstance(body, str):
+            return False
+        return await self._receive_payer_number.execute(
+            shop_id=shop_id, customer_id=customer_id, body=body[:200]
+        )
 
     async def _system(self, shop_id: UUID, message: InboundMessage) -> None:
         """Moves a customer to their new BSUID after `user_changed_number`."""

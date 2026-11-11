@@ -9,6 +9,7 @@ from sqlalchemy import (
     CheckConstraint,
     DateTime,
     ForeignKey,
+    Index,
     String,
     Text,
     UniqueConstraint,
@@ -29,6 +30,11 @@ class ProductModel(Base):
         UniqueConstraint("shop_id", "retailer_id"),
         CheckConstraint("price >= 0", name="price_positive"),
         CheckConstraint("stock >= 0", name="stock_positive"),
+        CheckConstraint(
+            "meta_sync_status IN ('PENDING', 'SYNCED', 'FAILED')", name="meta_sync_status_valid"
+        ),
+        # The retry cron looks for due products across every shop.
+        Index("ix_products_meta_sync_next_at", "meta_sync_next_at"),
     )
 
     id: Mapped[UUID] = mapped_column(primary_key=True)
@@ -40,6 +46,14 @@ class ProductModel(Base):
     retailer_id: Mapped[str] = mapped_column(String(100))
     description: Mapped[str] = mapped_column(Text)
     active: Mapped[bool]
+    # Sync with Meta's catalog: see `MetaSync` in the domain.
+    meta_sync_status: Mapped[str] = mapped_column(String(20))
+    meta_sync_version: Mapped[int]
+    meta_sync_attempts: Mapped[int]
+    meta_sync_next_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    meta_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    meta_sync_error: Mapped[str | None] = mapped_column(String(50))
+    meta_published: Mapped[bool]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()

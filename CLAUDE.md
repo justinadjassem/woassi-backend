@@ -160,7 +160,8 @@ API messages are for developers: a user-facing French UI should map from the sta
 - **A button reply is only trusted if its `context_message_id` is the message we sent** for that
   order: anyone can type `order:accept:<id>`. Merchant buttons answer the validation template,
   customer buttons the offer.
-- Closing (refused, cancelled, expired) gives the stock back. `OrderConfirmed` is for billing.
+- Closing (refused, cancelled, expired) gives the stock back. `OrderConfirmed` asks for the
+  payment; a CONFIRMED or PAID order can no longer be closed.
 - The cron `process_due_orders` runs every minute on `orders.next_deadline`: reminders at
   `reminder_1_minutes` and `reminder_2_minutes`, expiry after `expiration_hours`. It checks again
   under the row lock, so a merchant answering meanwhile wins.
@@ -172,6 +173,110 @@ API messages are for developers: a user-facing French UI should map from the sta
 - Stock reservation locks the products in id order (`list_for_update`): no overselling, no
   deadlock. Order numbers come from `order_counters`, under a row lock.
 - A cart replayed by Meta finds its order through `source_message_id` (unique per shop).
+
+## Payments
+
+- Woassi never holds funds: each shop has its own KPrimePay business account (one key = one
+  merchant). Its key is stored only through `SecretCipher`, never returned, never logged; the
+  API shows the mode (`sandbox`/`live`, from the `kpp_sbk_`/`kpp_lk_` prefix) and `updated_at`.
+- KPrimePay calls live in `payments/infrastructure/kprimepay.py`, each with a link to its doc,
+  run outside any transaction, and never let the key, the URL, a body or an httpx exception out.
+  `map_status` is the only place KPrimePay statuses become ours.
+- A `Payment` holds **attempts**: each USSD push (`ussd_push`) and each checkout is one
+  KPrimePay transaction whose `transaction_id` and `Idempotency-Key` are the attempt id
+  (KPrimePay binds a key to its first request). Creating one is retried after a timeout (unlike
+  WhatsApp sends), by the adapter then by the poller, with the same key. A refusal fails only the
+  attempt; `INVALID_KEY` fails the payment. The first PAID attempt pays the payment and cancels
+  the others; a second one is only logged (`payment_received_twice`, refund by hand).
+- On `OrderConfirmed`: a USSD push to the customer's WhatsApp number if it is a Togolese mobile
+  (`togolese_mobile`: +228, 7x/9x; 70-73 and 90-93 are `MIXX-YAS-TG`, others `MOOV-MONEY-TG`),
+  plus "confirm on your phone" with the buttons `payment:number:<id>` and `payment:link:<id>`.
+  Otherwise (BSUID-only, foreign number) we ask which Mobile Money number pays
+  (`awaiting_payer`). At most 3 pushes per payment, then only the link.
+- Payment buttons are trusted only when `context_message_id` is in `prompt_message_ids`.
+  `integration/orders.py` sends `payment:` payloads to `ReplyToPayment`, and a customer's text
+  to `ReceivePayerNumber` (after `RecordContact`), which only takes it when that customer has a
+  payment `awaiting_payer` in that shop and the text has digits; otherwise the text goes on.
+- The payer number is personal data: `repr=False`, never logged, never in events or audit,
+  masked in the API (`90 •• •• 56`).
+- **KPrimePay webhooks are unsigned.** `/webhooks/kprimepay/{token}` only finds the shop by the
+  token's SHA-256 (the token itself is encrypted, as it goes in every `callback_url`), claims
+  `{shop_id}:{event_id}` once, and queues `verify_kprimepay_payment`. Only `debit-status`, called
+  with the shop's key, can mark PAID, and only if transaction id, amount and XOF match. The
+  token shows in access logs: it can only trigger a check, never a payment.
+- PENDING → PAID, FAILED, EXPIRED or CANCELLED. FAILED and EXPIRED may still become PAID (late
+  confirmation); PAID and CANCELLED are final. The database allows one PAID and one PENDING
+  payment per order. The amount is always the order total (`with_fees=0`: the merchant pays the fee).
+- `OrderConfirmed` → `payments.request_payment` (deferred; does nothing without a KPrimePay
+  account). `PaymentConfirmed` → `orders.mark_paid` (CONFIRMED → PAID) and
+  `billing.issue_invoice`.
+- The cron `poll_pending_payments` sends again the attempts KPrimePay did not answer for,
+  checks each open attempt (2, 5, 10, 30 min, then hourly), and expires the payment after
+  `expires_at` (24 h, or later if a checkout lives longer). It claims each check under the row
+  lock by moving `next_check_at`.
+- A manual payment (`payment.recorded`) cancels the pending link. KPrimePay cannot cancel a
+  checkout: if the customer pays it anyway, the worker logs `payment_received_after_cancellation`
+  and the merchant refunds by hand (there is no refund API).
+- Messages go as free text or buttons inside the 24-hour window, else as the templates
+  `woassi_payment_push`, `woassi_payment_number` and `woassi_order_payment`
+  (`payments/application/texts.py`). A message failure never fails a payment.
+- `TemplateDefinition` refuses a body that starts or ends with a parameter (Meta rejects it):
+  end with a few words, e.g. `{{link}} . Merci !`.
+
+## Billing
+
+- An invoice is issued only once paid: `PaymentConfirmed` → `billing.issue_invoice` (deferred),
+  which numbers, renders (fpdf2, in the worker, never in a request), stores and sends it. One
+  invoice per order (partial unique index): a replayed event only finishes what was left undone.
+- One entity, `BillingDocument`, with `document_type` `INVOICE` or `CREDIT_NOTE`. Issued content
+  (number, date, seller and buyer snapshots, lines, totals, payment) is immutable and sealed by
+  `content_sha256`; only tracking fields move (PDF, certification, delivery, `credited_total`).
+  No delete anywhere: a trigger refuses DELETE on the billing tables (10-year retention).
+- Numbering: per shop and type, gapless, from `billing_counters` under a row lock in the issuing
+  transaction (`FAC-2026-000001` from `invoice_prefix`, `AV-2026-000001`). The year comes from
+  `Clock.local_now()` and is only a prefix: the sequence never restarts.
+- Amounts are TTC (catalog prices) and the invoice total is the amount paid. Rounding, per line:
+  amount before tax = total / (1 + rate), half up to the franc; tax = total − that. Totals are
+  sums of lines. Not VAT-registered: `NOT_SUBJECT`, 0 %, and the PDF prints
+  "NE FACTURE PAS LA TVA". The NIF is optional: a missing one never blocks an invoice.
+- Corrections only through credit notes (whole invoice, lines and quantities, or an amount),
+  never above what is left per line and per tax code, never negative; issued under the invoice's
+  row lock, audited `credit_note.issued`. They document a refund made by hand (no refund API).
+  Their PDF is rendered by `billing.render_credit_note`; they are not sent on WhatsApp.
+- Delivery: inside the 24-hour window, a `document` message with a 24-hour presigned URL; outside
+  it, the `woassi_invoice_ready` template with `{PUBLIC_BASE_URL}/invoices/{token}` (only the
+  token's SHA-256 is stored, 30 days), which redirects to a 5-minute presigned URL. A message
+  failure never fails the invoice: `delivery_status` FAILED, and `POST .../resend`.
+- OTR certified e-invoice (art. 62 LPF, not live): `InvoiceCertifier` is bound to
+  `NoCertificationRequired`. A shop in scope will get `PENDING` at issue, and its PDF and
+  delivery wait for `CERTIFIED` (`DocumentRelease._certify`). Never invent OTR endpoints.
+
+## Catalog sync
+
+- Carts name products by `retailer_id`, so every product is published to the Meta catalog linked
+  to the shop's number: `catalog/infrastructure/meta_catalog.py`
+  (`POST /{catalog_id}/items_batch`, `UPDATE` with `allow_upsert`, `DELETE` for an inactive
+  product Meta has). Doc links are there.
+- A change Meta shows (create, `UpdateProduct`, a READY photo, stock to or from 0) calls
+  `request_meta_sync`: `MetaSync` goes PENDING, `version` grows, one `ProductMetaSyncRequested`
+  per transaction. A sale that leaves stock records nothing: Meta does not get quantities.
+- Subscriber `catalog.sync_to_meta` (immediate) only queues `sync_catalog` with job id
+  `sync_catalog:{shop_id}` and a 5 s delay: changes coalesce into one Graph call per shop.
+- `SyncCatalogToMeta` reads the current products (order of events does not matter), calls Meta
+  outside any transaction, then writes the result under `list_for_update`, only to the version
+  sent: a change made meanwhile stays PENDING and goes in the next batch.
+- No connected number or catalog, or no READY photo: stays PENDING with `next_attempt_at` None
+  (`catalog.no_meta_catalog`, `catalog.photo_missing`), out of the cron. `WhatsAppConnected`
+  (deferred `catalog.resync_on_whatsapp_connected`) and `POST /shops/{id}/products/sync` mark
+  every product PENDING without events and queue one job.
+- Failures: `FAILED`, our code only (`meta.unavailable`, `meta.rate_limited`,
+  `meta.item_rejected`...), backoff 1 min doubling to 6 h. Cron `retry_catalog_sync` (every
+  5 min) queues shops with due products, which also catches events lost after a commit
+  (`META_SYNC_GRACE`, 5 min).
+- Meta's catalog doc asks for JPEG or PNG images; we send the 1024 px WebP. Check it on a real
+  catalog before relying on it.
+- Prices go as `"<amount> XOF"`; XOF has no minor unit. Meta requires `link`: built from
+  `META_CATALOG_LINK_BASE_URL`. `brand` is the shop's name.
 
 ## Pitfalls
 
@@ -208,10 +313,13 @@ Object keys:
 - original: `shops/{shop_id}/products/{product_id}/originals/{photo_id}`
 - final: `shops/{shop_id}/products/{product_id}/{photo_id}_{400|1024}.webp`
 - invoice: `shops/{shop_id}/invoices/{number}.pdf`
+- credit note: `shops/{shop_id}/credit-notes/{number}.pdf`
 
 ## Current state
 
-`accounts`, `catalog`, `customers`, `messaging`, `orders` and `shops` contain code. `billing` and
-`payments` are empty packages. Codes are only written to the logs (`LogVerificationCodeSender`, dev
-only). Carts become orders; customers and merchants get WhatsApp messages. No calls to the payment
-aggregator.
+Every module contains code. Codes are only written to the logs (`LogVerificationCodeSender`, dev
+only). Products are published to the shop's Meta catalog. Carts become orders; customers and
+merchants get WhatsApp messages. Confirmed orders get a KPrimePay USSD push or link, or are paid
+by hand; a
+validated payment publishes `PaymentConfirmed`, the order becomes PAID and the customer gets a
+PAID invoice (PDF). No OTR certification yet.

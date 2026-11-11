@@ -9,10 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 from woassi.config import Settings, get_settings
 from woassi.container import Container
 from woassi.modules.accounts.api.router import auth_router, me_router
+from woassi.modules.billing.api.router import public_router as billing_public_router
+from woassi.modules.billing.api.router import router as billing_router
 from woassi.modules.catalog.api.router import router as catalog_router
 from woassi.modules.customers.api.router import router as customers_router
 from woassi.modules.messaging.api.router import router as messaging_router
 from woassi.modules.orders.api.router import router as orders_router
+from woassi.modules.payments.api.router import router as payments_router
+from woassi.modules.payments.api.router import webhook_router as payments_webhook_router
 from woassi.modules.shops.api.router import account_router as shops_account_router
 from woassi.modules.shops.api.router import router as shops_router
 from woassi.shared.api.audit import router as audit_router
@@ -61,4 +65,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.include_router(orders_router)
     app.include_router(customers_router)
     app.include_router(messaging_router)
+    app.include_router(payments_router)
+    app.include_router(payments_webhook_router)
+    app.include_router(billing_router)
+    app.include_router(billing_public_router)
     return app

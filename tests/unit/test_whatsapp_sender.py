@@ -9,6 +9,7 @@ import structlog
 from woassi.modules.messaging.application.ports import SendError, SendFailure, ShopConnection
 from woassi.modules.messaging.domain.content import (
     ButtonsMessage,
+    DocumentMessage,
     Recipient,
     ReplyButton,
     TemplateMessage,
@@ -70,6 +71,24 @@ async def test_text(sender: HttpxWhatsAppSender) -> None:
         "type": "text",
         "text": {"preview_url": False, "body": "Bonjour"},
     }
+
+
+@respx.mock
+async def test_document(sender: HttpxWhatsAppSender) -> None:
+    route = respx.post(URL).mock(return_value=httpx.Response(200, json=ACCEPTED))
+    message = DocumentMessage(
+        "https://files.example/FAC-1.pdf?X-Amz-Signature=abc", "FAC-1.pdf", "Votre facture"
+    )
+    assert await sender.send(SHOP, BY_PHONE, message) == "wamid.SENT"
+    body = sent(route)
+    assert body["type"] == "document"
+    assert body["document"] == {
+        "link": "https://files.example/FAC-1.pdf?X-Amz-Signature=abc",
+        "filename": "FAC-1.pdf",
+        "caption": "Votre facture",
+    }
+    await sender.send(SHOP, BY_PHONE, DocumentMessage("https://f.example/a.pdf", "a.pdf"))
+    assert "caption" not in sent(route)["document"]  # type: ignore[operator]
 
 
 @respx.mock

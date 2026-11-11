@@ -4,9 +4,12 @@ from collections.abc import Callable
 from uuid import UUID
 
 from woassi.modules.shops.application.dto import (
+    ShopBillingProfile,
+    ShopCatalogRouting,
     ShopOrderProfile,
     ShopRouting,
     ShopView,
+    billing_profile,
     order_profile,
     shop_view,
 )
@@ -195,6 +198,31 @@ class ResolveShopConnection:
         return _routing(shop, self._cipher)
 
 
+class ResolveShopCatalog:
+    """Gives the Meta catalog linked to a shop's number, for the catalog sync."""
+
+    def __init__(self, uow: ShopsUnitOfWork, cipher: SecretCipher) -> None:
+        self._uow = uow
+        self._cipher = cipher
+
+    async def execute(self, shop_id: UUID) -> ShopCatalogRouting | None:
+        """None unless the shop is ACTIVE, with a CONNECTED number and a linked catalog."""
+        async with self._uow as uow:
+            shop = await uow.shops.get(shop_id)
+        routing = _routing(shop, self._cipher)
+        if routing is None or shop is None or shop.whatsapp is None:
+            return None
+        catalog_id = shop.whatsapp.catalog_id
+        if not catalog_id:
+            return None
+        return ShopCatalogRouting(
+            shop_id=shop.id,
+            name=shop.name,
+            catalog_id=catalog_id,
+            access_token=routing.access_token,
+        )
+
+
 def _routing(shop: Shop | None, cipher: SecretCipher) -> ShopRouting | None:
     """Routing data of an ACTIVE shop with a CONNECTED number, token decrypted; None otherwise."""
     if shop is None or shop.status is not ShopStatus.ACTIVE or not shop.whatsapp_connected:
@@ -220,3 +248,15 @@ class GetShopOrderProfile:
         async with self._uow as uow:
             shop = await uow.shops.get(shop_id)
         return order_profile(shop) if shop else None
+
+
+class GetShopBillingProfile:
+    """Returns what the billing module prints about a shop; None if it is gone or archived."""
+
+    def __init__(self, uow: ShopsUnitOfWork) -> None:
+        self._uow = uow
+
+    async def execute(self, shop_id: UUID) -> ShopBillingProfile | None:
+        async with self._uow as uow:
+            shop = await uow.shops.get(shop_id)
+        return billing_profile(shop) if shop else None

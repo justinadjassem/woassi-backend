@@ -14,7 +14,7 @@ from woassi.modules.accounts.domain.errors import PhoneAlreadyUsed
 from woassi.modules.accounts.domain.refresh_token import RefreshToken
 from woassi.modules.accounts.domain.verification_code import CodePurpose, VerificationCode
 from woassi.modules.catalog.domain.errors import UnreadableImage
-from woassi.modules.catalog.domain.product import Product
+from woassi.modules.catalog.domain.product import MetaSyncStatus, Product
 from woassi.modules.messaging.application.ports import ShopConnection, SubmittedTemplate
 from woassi.modules.messaging.domain.event import InboundMessage, MetaEvent
 from woassi.modules.messaging.domain.outbound import OutboundMessage
@@ -26,6 +26,8 @@ from woassi.shared.domain.audit import AuditEntry
 from woassi.shared.domain.errors import ObjectNotFound
 from woassi.shared.domain.events import DomainEvent, Entity
 from woassi.shared.domain.values import PhoneNumber
+
+NOW = datetime(2026, 1, 1, 9, tzinfo=UTC)
 
 
 class FakeStorage:
@@ -64,9 +66,16 @@ class FakeProductRepository:
     def __init__(self) -> None:
         self.products: dict[UUID, Product] = {}
         self.pending: dict[UUID, Product] = {}
+        self.tracked: list[Product] = []
+
+    def _stage(self, product: Product) -> None:
+        stored = deepcopy(product)
+        stored.pull_events()
+        self.pending[product.id] = stored
+        self.tracked.append(product)
 
     async def add(self, product: Product) -> None:
-        self.pending[product.id] = deepcopy(product)
+        self._stage(product)
 
     async def get(self, shop_id: UUID, product_id: UUID) -> Product | None:
         product = self.products.get(product_id)
@@ -85,8 +94,50 @@ class FakeProductRepository:
     async def count(self, shop_id: UUID) -> int:
         return len([p for p in self.products.values() if p.shop_id == shop_id])
 
+    async def list_for_update(
+        self, shop_id: UUID, *, retailer_ids: Sequence[str] = (), ids: Sequence[UUID] = ()
+    ) -> Sequence[Product]:
+        products = [
+            p
+            for p in self.products.values()
+            if p.shop_id == shop_id and (p.retailer_id in retailer_ids or p.id in ids)
+        ]
+        return deepcopy(sorted(products, key=lambda p: p.id))
+
+    async def list_shop_for_update(self, shop_id: UUID) -> Sequence[Product]:
+        products = [p for p in self.products.values() if p.shop_id == shop_id]
+        return deepcopy(sorted(products, key=lambda p: p.id))
+
+    async def list_meta_sync_due(
+        self, shop_id: UUID, now: datetime, limit: int
+    ) -> Sequence[Product]:
+        due = [
+            p
+            for p in sorted(self.products.values(), key=lambda p: p.id)
+            if p.shop_id == shop_id
+            and p.meta_sync.next_attempt_at is not None
+            and (
+                p.meta_sync.status is MetaSyncStatus.PENDING
+                or (
+                    p.meta_sync.status is MetaSyncStatus.FAILED
+                    and p.meta_sync.next_attempt_at <= now
+                )
+            )
+        ]
+        return deepcopy(due[:limit])
+
+    async def shops_with_meta_sync_due(self, now: datetime, limit: int) -> Sequence[UUID]:
+        shop_ids = {
+            p.shop_id
+            for p in self.products.values()
+            if p.meta_sync.status is not MetaSyncStatus.SYNCED
+            and p.meta_sync.next_attempt_at is not None
+            and p.meta_sync.next_attempt_at <= now
+        }
+        return sorted(shop_ids)[:limit]
+
     async def save(self, product: Product) -> None:
-        self.pending[product.id] = deepcopy(product)
+        self._stage(product)
 
 
 class FakeAuditLog:
@@ -149,6 +200,7 @@ class FakeUoW:
     def __init__(self) -> None:
         self.repository = FakeProductRepository()
         self.audit_log = FakeAuditLog()
+        self.events: list[DomainEvent] = []
 
     @property
     def products(self) -> FakeProductRepository:
@@ -172,9 +224,13 @@ class FakeUoW:
     async def commit(self) -> None:
         self.repository.products.update(self.repository.pending)
         self.repository.pending.clear()
+        for product in self.repository.tracked:
+            self.events.extend(product.pull_events())
+        self.repository.tracked.clear()
 
     async def rollback(self) -> None:
         self.repository.pending.clear()
+        self.repository.tracked.clear()
 
 
 class FakeJobQueue:
@@ -183,6 +239,14 @@ class FakeJobQueue:
 
     async def enqueue_processing(self, photo_id: UUID) -> None:
         self.photos.append(photo_id)
+
+
+class FakeCatalogSyncQueue:
+    def __init__(self) -> None:
+        self.shops: list[UUID] = []
+
+    async def enqueue_sync(self, shop_id: UUID) -> None:
+        self.shops.append(shop_id)
 
 
 class FakeImageProcessor:

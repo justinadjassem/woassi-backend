@@ -20,7 +20,10 @@ class Recorder:
         self.carts: list[Cart] = []
         self.replies: list[dict[str, Any]] = []
         self.user_id_changes: list[dict[str, Any]] = []
+        self.payment_replies: list[dict[str, Any]] = []
+        self.payer_numbers: list[dict[str, Any]] = []
         self.reply_result = reply_result
+        self.number_taken = False
 
     async def execute(self, **kwargs: Any) -> Any:  # pragma: no cover - replaced below
         raise NotImplementedError
@@ -62,12 +65,32 @@ class Replies:
         return self.recorder.reply_result
 
 
+class PaymentReplies:
+    def __init__(self, recorder: Recorder) -> None:
+        self.recorder = recorder
+
+    async def execute(self, **kwargs: Any) -> bool:
+        self.recorder.payment_replies.append(kwargs)
+        return self.recorder.reply_result
+
+
+class PayerNumbers:
+    def __init__(self, recorder: Recorder) -> None:
+        self.recorder = recorder
+
+    async def execute(self, **kwargs: Any) -> bool:
+        self.recorder.payer_numbers.append(kwargs)
+        return self.recorder.number_taken
+
+
 def handler(recorder: Recorder) -> OrdersInboundHandler:
     return OrdersInboundHandler(
         Contacts(recorder),  # type: ignore[arg-type]
         Changes(recorder),  # type: ignore[arg-type]
         Carts(recorder),  # type: ignore[arg-type]
         Replies(recorder),  # type: ignore[arg-type]
+        PaymentReplies(recorder),  # type: ignore[arg-type]
+        PayerNumbers(recorder),  # type: ignore[arg-type]
         FrozenClock(datetime(2026, 1, 1, tzinfo=UTC)),
     )
 
@@ -154,6 +177,40 @@ async def test_other_messages_only_keep_the_customer(type_: str) -> None:
     await handler(recorder).handle(SHOP, message(type_, {"body": "Bonjour"}))
     assert len(recorder.contacts) == 1
     assert recorder.carts == recorder.replies == []
+
+
+async def test_payment_buttons_go_to_payments() -> None:
+    recorder = Recorder()
+    await handler(recorder).handle(
+        SHOP,
+        message(
+            "interactive",
+            {"type": "button_reply", "button_reply": {"id": "payment:link:x", "title": "Lien"}},
+            context_message_id="wamid.PROMPT",
+        ),
+    )
+    assert recorder.replies == []
+    assert recorder.payment_replies == [
+        {"shop_id": SHOP, "payload": "payment:link:x", "context_message_id": "wamid.PROMPT"}
+    ]
+    assert recorder.contacts == []
+
+
+async def test_a_text_may_be_the_payer_number() -> None:
+    recorder = Recorder()
+    recorder.number_taken = True
+    await handler(recorder).handle(SHOP, message("text", {"body": "90 12 34 56"}))
+    # The customer is recorded first (the 24-hour window), then payments sees the text.
+    assert len(recorder.contacts) == 1
+    assert recorder.payer_numbers == [
+        {"shop_id": SHOP, "customer_id": CUSTOMER, "body": "90 12 34 56"}
+    ]
+
+
+async def test_carts_never_reach_payments() -> None:
+    recorder = Recorder()
+    await handler(recorder).handle(SHOP, message("order", ORDER))
+    assert recorder.payer_numbers == [] and len(recorder.carts) == 1
 
 
 async def test_a_customer_with_a_username_has_no_phone() -> None:

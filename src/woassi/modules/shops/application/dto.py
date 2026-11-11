@@ -13,6 +13,7 @@ from woassi.modules.shops.domain.shop import (
     Shop,
     ShopSettings,
     ShopStatus,
+    TaxRegime,
     ValidationMode,
     WhatsAppAccount,
     WhatsAppStatus,
@@ -156,6 +157,16 @@ class ShopRouting:
 
 
 @dataclass(frozen=True, slots=True)
+class ShopCatalogRouting:
+    """The Meta catalog of a connected shop, with its decrypted token. Never log it."""
+
+    shop_id: UUID
+    name: str
+    catalog_id: str
+    access_token: str = field(repr=False)
+
+
+@dataclass(frozen=True, slots=True)
 class ShopOrderProfile:
     """What the orders module needs to know about a shop."""
 
@@ -186,4 +197,46 @@ def order_profile(shop: Shop) -> ShopOrderProfile:
         reminder_1_minutes=settings.reminder_1_minutes,
         reminder_2_minutes=settings.reminder_2_minutes,
         expiration_hours=settings.expiration_hours,
+    )
+
+
+@dataclass(frozen=True, slots=True)
+class ShopBillingProfile:
+    """What the billing module prints on a shop's invoices. Empty strings when unknown."""
+
+    shop_id: UUID
+    account_id: UUID
+    name: str
+    language: Language
+    invoice_prefix: str
+    legal_name: str
+    address: str
+    phone: str
+    tax_id: str
+    trade_register: str
+    tax_regime: TaxRegime | None
+    vat_registered: bool
+    logo_key: str | None
+
+
+def billing_profile(shop: Shop) -> ShopBillingProfile:
+    """Builds the billing profile of `shop`: the legal address, else the shop's own address."""
+    details = shop.settings.invoice_details
+    address = details.address.strip() or ", ".join(
+        part for part in (shop.address.strip(), shop.city.strip()) if part
+    )
+    return ShopBillingProfile(
+        shop_id=shop.id,
+        account_id=shop.account_id,
+        name=shop.name,
+        language=shop.settings.language,
+        invoice_prefix=shop.settings.invoice_prefix,
+        legal_name=details.company_name.strip(),
+        address=address,
+        phone=details.phone.strip(),
+        tax_id=details.tax_id.strip(),
+        trade_register=details.trade_register.strip(),
+        tax_regime=details.tax_regime,
+        vat_registered=details.vat_registered,
+        logo_key=shop.logo_key,
     )

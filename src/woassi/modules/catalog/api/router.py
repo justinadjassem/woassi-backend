@@ -10,8 +10,10 @@ from fastapi import APIRouter, Depends, Response, status
 
 from woassi.modules.catalog.api.deps import CatalogDep
 from woassi.modules.catalog.api.schemas import (
+    CatalogSyncResponse,
     ProductCreate,
     ProductResponse,
+    ProductUpdate,
     UploadUrlRequest,
     UploadUrlResponse,
 )
@@ -43,10 +45,32 @@ async def list_products(
     return Page[ProductResponse].from_result(result, ProductResponse.from_view)
 
 
+@router.post("/sync", status_code=status.HTTP_202_ACCEPTED)
+async def sync_products(shop_id: UUID, catalog: CatalogDep) -> CatalogSyncResponse:
+    """Sends every product to the Meta catalog again, in the background.
+
+    Products are synced on every change anyway; this is for a catalog edited or emptied on
+    Meta's side. Without a connected WhatsApp number, products stay PENDING.
+    """
+    pending = await catalog.request_catalog_resync().execute(shop_id)
+    return CatalogSyncResponse(pending=pending)
+
+
 @router.get("/{product_id}")
 async def get_product(shop_id: UUID, product_id: UUID, catalog: CatalogDep) -> ProductResponse:
     """One product of the shop, with its photos."""
     product = await catalog.get_product().execute(shop_id=shop_id, product_id=product_id)
+    return ProductResponse.from_view(product)
+
+
+@router.patch("/{product_id}")
+async def update_product(
+    shop_id: UUID, product_id: UUID, body: ProductUpdate, catalog: CatalogDep
+) -> ProductResponse:
+    """Changes the fields sent. `active: false` removes the product from Meta's catalog."""
+    product = await catalog.update_product().execute(
+        shop_id=shop_id, product_id=product_id, **body.model_dump(exclude_unset=True)
+    )
     return ProductResponse.from_view(product)
 
 

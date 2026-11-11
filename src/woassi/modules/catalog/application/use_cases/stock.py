@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from uuid import UUID
 
 from woassi.modules.catalog.application.ports import CatalogUnitOfWork
+from woassi.shared.application.ports import Clock
 
 
 @dataclass(frozen=True, slots=True)
@@ -23,10 +24,12 @@ class ReserveStock:
     """Reserve what is available, up to the requested quantities, in one transaction.
 
     Products are locked while they are counted: two carts cannot sell the same last item.
+    Selling the last unit asks for a Meta sync (out of stock); other sales do not.
     """
 
-    def __init__(self, uow: CatalogUnitOfWork) -> None:
+    def __init__(self, uow: CatalogUnitOfWork, clock: Clock) -> None:
         self._uow = uow
+        self._clock = clock
 
     async def execute(self, *, shop_id: UUID, requested: Mapping[str, int]) -> list[ReservedItem]:
         """Reserves up to `requested` units per retailer id.
@@ -49,7 +52,7 @@ class ReserveStock:
                     continue
                 reserved = min(max(quantity, 0), product.stock) if product.active else 0
                 if reserved:
-                    product.adjust_stock(-reserved)
+                    product.adjust_stock(-reserved, now=self._clock.now())
                     await uow.products.save(product)
                 items.append(
                     ReservedItem(
@@ -66,15 +69,19 @@ class ReserveStock:
 
 
 class ReleaseStock:
-    """Gives reserved units back to the stock, e.g. when an order is closed."""
+    """Gives reserved units back to the stock, e.g. when an order is closed.
 
-    def __init__(self, uow: CatalogUnitOfWork) -> None:
+    Back above zero asks for a Meta sync (in stock again).
+    """
+
+    def __init__(self, uow: CatalogUnitOfWork, clock: Clock) -> None:
         self._uow = uow
+        self._clock = clock
 
     async def execute(self, *, shop_id: UUID, quantities: Mapping[UUID, int]) -> None:
         """A deleted product is skipped: there is no stock left to give back to."""
         async with self._uow as uow:
             for product in await uow.products.list_for_update(shop_id, ids=list(quantities)):
-                product.adjust_stock(quantities[product.id])
+                product.adjust_stock(quantities[product.id], now=self._clock.now())
                 await uow.products.save(product)
             await uow.commit()

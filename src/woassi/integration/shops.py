@@ -1,7 +1,8 @@
-"""Shops module seen from `shared`, `messaging` and `orders`."""
+"""Shops module seen from `shared`, `messaging`, `orders` and `catalog`."""
 
 from uuid import UUID
 
+from woassi.modules.catalog.application.ports import MetaCatalogAccess
 from woassi.modules.messaging.application.ports import ShopConnection
 from woassi.modules.orders.application.ports import ShopProfile
 from woassi.modules.orders.domain.order import ValidationMode
@@ -10,6 +11,7 @@ from woassi.modules.shops.application.use_cases.shops import (
     CheckShopOwnership,
     GetShopOrderProfile,
     ResolveShopByPhoneNumber,
+    ResolveShopCatalog,
     ResolveShopConnection,
 )
 from woassi.modules.shops.application.use_cases.whatsapp import HandleWhatsAppAccountRemoved
@@ -89,4 +91,20 @@ class ShopsOrderProfiles:
             reminder_1_minutes=profile.reminder_1_minutes,
             reminder_2_minutes=profile.reminder_2_minutes,
             expiration_hours=profile.expiration_hours,
+        )
+
+
+class ShopsMetaCatalogs:
+    """MetaCatalogAccessPort, for the catalog module, backed by the shops module."""
+
+    def __init__(self, use_case: ResolveShopCatalog) -> None:
+        self._use_case = use_case
+
+    async def for_shop(self, shop_id: UUID) -> MetaCatalogAccess | None:
+        """The shop's Meta catalog and token; None without a connected number and catalog."""
+        routing = await self._use_case.execute(shop_id)
+        if routing is None:
+            return None
+        return MetaCatalogAccess(
+            catalog_id=routing.catalog_id, access_token=routing.access_token, brand=routing.name
         )

@@ -11,7 +11,8 @@ from sqlalchemy.orm import Mapped, mapped_column
 from woassi.shared.infrastructure.db.base import Base
 
 _STATUSES = (
-    "'AWAITING_CUSTOMER', 'AWAITING_MERCHANT', 'CONFIRMED', 'REJECTED', 'CANCELLED', 'EXPIRED'"
+    "'AWAITING_CUSTOMER', 'AWAITING_MERCHANT', 'CONFIRMED', 'PAID', 'REJECTED', 'CANCELLED', "
+    "'EXPIRED'"
 )
 
 
@@ -55,6 +56,7 @@ class OrderModel(Base):
     closed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     closing_reason: Mapped[str | None] = mapped_column(String(30))
     decided_by: Mapped[str | None] = mapped_column(String(20))
+    paid_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class OrderCounterModel(Base):

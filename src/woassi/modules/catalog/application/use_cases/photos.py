@@ -25,7 +25,7 @@ from woassi.modules.catalog.domain.product import (
     Product,
     variant_key,
 )
-from woassi.shared.application.ports import StoragePort
+from woassi.shared.application.ports import Clock, StoragePort
 from woassi.shared.domain.errors import ObjectNotFound
 
 ALLOWED_CONTENT_TYPES = frozenset({"image/jpeg", "image/png", "image/webp"})
@@ -130,7 +130,10 @@ class ConfirmPhoto:
 
 
 class ProcessPhoto:
-    """Run by the worker. No-op if the photo has already been processed."""
+    """Run by the worker. No-op if the photo has already been processed.
+
+    A READY photo asks for a Meta sync: Meta's catalog shows the 1024 px variant.
+    """
 
     def __init__(
         self,
@@ -138,11 +141,13 @@ class ProcessPhoto:
         uploads: StoragePort,
         images: StoragePort,
         processor: ImageProcessor,
+        clock: Clock,
     ) -> None:
         self._uow = uow
         self._uploads = uploads
         self._images = images
         self._processor = processor
+        self._clock = clock
 
     async def execute(self, photo_id: UUID) -> None:
         """Generates the 400 px and 1024 px WebP variants, then deletes the original.
@@ -151,25 +156,35 @@ class ProcessPhoto:
         """
         async with self._uow as uow:
             product = await uow.products.get_by_photo(photo_id)
-            if product is None:
-                raise PhotoNotFound(f"Photo {photo_id} not found.")
-            photo = product.photo(photo_id)
-            if photo.status is not PhotoStatus.PENDING:
+        if product is None:
+            raise PhotoNotFound(f"Photo {photo_id} not found.")
+        photo = product.photo(photo_id)
+        if photo.status is not PhotoStatus.PENDING:
+            return
+
+        keys: dict[int, str] | None = None
+        try:
+            original = await self._uploads.get(photo.original_key)
+            variants = await self._processor.webp_variants(original, VARIANT_SIZES)
+        except (ObjectNotFound, UnreadableImage):
+            pass
+        else:
+            keys = {}
+            for size, data in variants.items():
+                key = variant_key(product.shop_id, product.id, photo.id, size)
+                await self._images.put(key, data, "image/webp")
+                keys[size] = key
+
+        async with self._uow as uow:
+            # Reloaded under lock: a stock reservation during the processing must not be lost.
+            locked = await uow.products.list_for_update(product.shop_id, ids=[product.id])
+            if not locked or locked[0].photo(photo_id).status is not PhotoStatus.PENDING:
                 return
-
-            try:
-                original = await self._uploads.get(photo.original_key)
-                variants = await self._processor.webp_variants(original, VARIANT_SIZES)
-            except (ObjectNotFound, UnreadableImage):
-                photo.reject()
+            product = locked[0]
+            if keys is None:
+                product.photo(photo_id).reject()
             else:
-                keys: dict[int, str] = {}
-                for size, data in variants.items():
-                    key = variant_key(product.shop_id, product.id, photo.id, size)
-                    await self._images.put(key, data, "image/webp")
-                    keys[size] = key
-                photo.mark_ready(keys)
-
+                product.mark_photo_ready(photo_id, keys, self._clock.now())
             await uow.products.save(product)
             await uow.commit()
 

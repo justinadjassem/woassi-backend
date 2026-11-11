@@ -33,7 +33,7 @@ URL = "https://graph.facebook.com/v27.0/1001/message_templates"
 DEFINITION = TemplateDefinition(
     name="woassi_order_validation",
     language="fr",
-    body="Commande n°{{order_number}} : {{total}}.",
+    body="Commande n°{{order_number}} : {{total}}. Merci !",
     examples={"order_number": "42", "total": "15 000 FCFA"},
     quick_replies=("Valider", "Indisponible"),
 )
@@ -44,8 +44,39 @@ def test_woassi_ships_its_templates_in_french_and_english() -> None:
     assert {(d.name, d.language) for d in definitions} == {
         ("woassi_order_validation", "fr"),
         ("woassi_order_validation", "en"),
+        ("woassi_order_payment", "fr"),
+        ("woassi_order_payment", "en"),
+        ("woassi_payment_push", "fr"),
+        ("woassi_payment_push", "en"),
+        ("woassi_payment_number", "fr"),
+        ("woassi_payment_number", "en"),
+        ("woassi_invoice_ready", "fr"),
+        ("woassi_invoice_ready", "en"),
     }
-    assert all(len(d.quick_replies) == 2 for d in definitions)
+    by_name = {(d.name, d.language): d for d in definitions}
+    assert len(by_name["woassi_order_validation", "fr"].quick_replies) == 2
+    payment = by_name["woassi_order_payment", "fr"]
+    assert payment.quick_replies == ()
+    assert set(payment.examples) == {"order_number", "total", "link"}
+    invoice = by_name["woassi_invoice_ready", "en"]
+    assert set(invoice.examples) == {"invoice_number", "total", "link"}
+    assert by_name["woassi_payment_push", "en"].quick_replies == ("Another number", "Payment link")
+    assert by_name["woassi_payment_number", "fr"].quick_replies == ("Lien de paiement",)
+    # Meta refuses a body that starts or ends with a parameter: none of ours does.
+    for definition in definitions:
+        assert not definition.body.startswith("{{"), definition.name
+        assert not definition.body.rstrip(" .!?:;,").endswith("}}"), definition.name
+
+
+@pytest.mark.parametrize(
+    "body",
+    ["{{total}} à payer.", "Payez ici : {{link}}", "Payez ici : {{link}} .", "Total {{total}} !"],
+)
+def test_a_body_cannot_start_or_end_with_a_parameter(body: str) -> None:
+    examples = {name: "x" for name in ("total", "link") if f"{{{{{name}}}}}" in body}
+    with pytest.raises(InvalidMessage):
+        TemplateDefinition(name="t", language="fr", body=body, examples=examples)
+        assert not body.lstrip().startswith("{{")
 
 
 @pytest.mark.parametrize(
@@ -100,7 +131,7 @@ async def test_submission_request(registry: GraphTemplateRegistry) -> None:
         "components": [
             {
                 "type": "BODY",
-                "text": "Commande n°{{order_number}} : {{total}}.",
+                "text": "Commande n°{{order_number}} : {{total}}. Merci !",
                 "example": {
                     "body_text_named_params": [
                         {"param_name": "order_number", "example": "42"},
@@ -175,7 +206,7 @@ async def test_provisioning_submits_every_definition() -> None:
 
     assert await provision.execute(SHOP.shop_id) == 0
 
-    assert len(registry.submitted) == 2
+    assert len(registry.submitted) == len(template_definitions()) == 10
     stored = database.templates[(SHOP.shop_id, "woassi_order_validation", "fr")]
     assert stored.status is TemplateStatus.PENDING
     assert stored.waba_id == "1001"

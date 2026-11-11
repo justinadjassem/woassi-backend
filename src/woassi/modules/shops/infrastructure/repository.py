@@ -1,6 +1,7 @@
 """SQLAlchemy implementation of the shop repository."""
 
 from collections.abc import Callable, Sequence
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import func, select
@@ -17,6 +18,7 @@ from woassi.modules.shops.domain.shop import (
     Shop,
     ShopSettings,
     ShopStatus,
+    TaxRegime,
     ValidationMode,
     WhatsAppAccount,
     WhatsAppStatus,
@@ -31,6 +33,20 @@ from woassi.shared.domain.events import Entity
 from woassi.shared.domain.values import PhoneNumber
 
 
+def _invoice_details(data: dict[str, Any]) -> InvoiceDetails:
+    """Rows written before the tax fields existed read as not VAT-registered, no regime."""
+    regime = data.get("tax_regime")
+    return InvoiceDetails(
+        company_name=data.get("company_name", ""),
+        tax_id=data.get("tax_id", ""),
+        trade_register=data.get("trade_register", ""),
+        address=data.get("address", ""),
+        phone=data.get("phone", ""),
+        tax_regime=TaxRegime(regime) if regime else None,
+        vat_registered=bool(data.get("vat_registered", False)),
+    )
+
+
 def _settings_to_domain(model: ShopSettingsModel) -> ShopSettings:
     """Converts a settings row to domain `ShopSettings`."""
     number = model.notification_number
@@ -41,7 +57,7 @@ def _settings_to_domain(model: ShopSettingsModel) -> ShopSettings:
         reminder_2_minutes=model.reminder_2_minutes,
         expiration_hours=model.expiration_hours,
         welcome_message=model.welcome_message,
-        invoice_details=InvoiceDetails(**model.invoice_details),
+        invoice_details=_invoice_details(model.invoice_details),
         invoice_prefix=model.invoice_prefix,
         language=Language(model.language),
         validation_mode=ValidationMode(model.validation_mode),
@@ -113,6 +129,8 @@ def _copy_settings(settings: ShopSettings, model: ShopSettingsModel) -> ShopSett
         "trade_register": details.trade_register,
         "address": details.address,
         "phone": details.phone,
+        "tax_regime": details.tax_regime.value if details.tax_regime else None,
+        "vat_registered": details.vat_registered,
     }
     model.invoice_prefix = settings.invoice_prefix
     model.language = settings.language.value

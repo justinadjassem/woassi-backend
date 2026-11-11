@@ -1,8 +1,8 @@
 """Orders and their life cycle.
 
-AWAITING_CUSTOMER (partial cart) -> AWAITING_MERCHANT -> CONFIRMED, or closed: REJECTED,
+AWAITING_CUSTOMER (partial cart) -> AWAITING_MERCHANT -> CONFIRMED -> PAID, or closed: REJECTED,
 CANCELLED or EXPIRED. A complete cart skips AWAITING_CUSTOMER; an automatic validation skips
-AWAITING_MERCHANT.
+AWAITING_MERCHANT. A confirmed or paid order can no longer be closed.
 """
 
 from dataclasses import dataclass, field, replace
@@ -11,7 +11,7 @@ from enum import StrEnum
 from uuid import UUID, uuid4
 
 from woassi.modules.orders.domain.errors import OrderNotOpen
-from woassi.modules.orders.domain.events import OrderClosed, OrderConfirmed
+from woassi.modules.orders.domain.events import OrderClosed, OrderConfirmed, OrderPaid
 from woassi.shared.domain.events import Entity
 from woassi.shared.domain.values import Amount
 
@@ -22,6 +22,7 @@ class OrderStatus(StrEnum):
     AWAITING_CUSTOMER = "AWAITING_CUSTOMER"  # part of the cart is missing: does the rest do?
     AWAITING_MERCHANT = "AWAITING_MERCHANT"
     CONFIRMED = "CONFIRMED"
+    PAID = "PAID"  # the payments module validated a payment of the full total
     REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"
     EXPIRED = "EXPIRED"
@@ -130,6 +131,7 @@ class Order(Entity):
     closed_at: datetime | None = None
     closing_reason: ClosingReason | None = None
     decided_by: DecidedBy | None = None
+    paid_at: datetime | None = None
 
     @classmethod
     def receive(
@@ -228,6 +230,13 @@ class Order(Entity):
         if not self.is_open:
             raise OrderNotOpen(f"Order {self.number} is {self.status.value}.")
         self._close(OrderStatus.EXPIRED, ClosingReason.EXPIRED, DecidedBy.SYSTEM, now)
+
+    def mark_paid(self, now: datetime) -> None:
+        """A payment of the total was validated. Raises OrderNotOpen unless CONFIRMED."""
+        self._require(OrderStatus.CONFIRMED)
+        self.status = OrderStatus.PAID
+        self.paid_at = now
+        self.record_event(OrderPaid(order_id=self.id, shop_id=self.shop_id))
 
     def due_action(self, now: datetime) -> DueAction | None:
         """EXPIRE past the expiry, REMIND past the next reminder, None otherwise."""
